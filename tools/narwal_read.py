@@ -45,6 +45,7 @@ def deep_get(d: dict, *keys):
 
 
 async def main() -> int:
+    OUT.mkdir(parents=True, exist_ok=True)
     client = NarwalClient(HOST, device_id=DEVICE_ID, topic_prefix=PREFIX)
     await client.connect()
     print(f"connected to {HOST}")
@@ -56,7 +57,8 @@ async def main() -> int:
             print(f"discover/wake note: {e!r} (continuing with config values)")
 
         info = await client.get_device_info()
-        print(f"device_info: result={info.result_code} data_keys={list(info.data.keys())}")
+        print(f"device_info: product_key={info.product_key} device_id={info.device_id} "
+              f"firmware={info.firmware_version}")
 
         gm = await client.send_command("map/get_map", b"", timeout=20.0)
         (OUT / "get_map.bin").write_bytes(gm.raw_payload)

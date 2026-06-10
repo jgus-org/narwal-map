@@ -16,18 +16,28 @@ package octopus.mqtt.msg;
 
 // ---- geometry / shared ----
 
-message Point {            // used for cut-line endpoints, forbidden polygons, trapped points
-  int32 x = 1;             // units TBD: confirm world-vs-grid against live data
-  int32 y = 2;
+// Cut-line endpoints, forbidden polygons, trapped points. Live capture (get_two_rooms_crossing_point) confirms x,y are float (fixed32), not int — values like (78.0, -154.0) in the same signed grid-pixel frame as Grid, carrying sub-pixel precision.
+message Point {
+  float x = 1;
+  float y = 2;
 }
 
-message Grid {             // used for room-contour points, door points (grid/pixel coords)
+message Grid {             // room-contour points, door points: int32 signed grid pixels (resolution mm/pixel)
   int32 x = 1;
   int32 y = 2;
 }
 
-message PoseData { /* origin/station/robot pose; x,y(,theta) — see asm/msg_map */ }
-message Border   { /* map bounding box — see asm/msg_map/MapBaseType */ }
+message PoseData {         // origin/station/robot pose; world units. Live: {1:{x,y} float32 metres, 2: theta float32 radians}
+  Point xy    = 1;
+  float theta = 2;
+}
+
+message Border {           // map bounding box, signed grid pixels. Live: spans = (right-left)=width-1, (top-bottom)=height-1
+  int32 bottom = 1;
+  int32 top    = 2;
+  int32 left   = 3;
+  int32 right  = 4;
+}
 
 message RoomInfo {
   int32  room_id     = 1;
@@ -88,7 +98,7 @@ message StaticMapPayload {
   repeated RoomInfo      room_infos = 12;
   oneof map_data_oneof {
     MapData map      = 16;      // structured grid
-    bytes   map_data = 17;      // zlib-compressed packed-varint grid (what the HACS client decodes)
+    bytes   map_data = 17;      // zlib(MapData): per-pixel (room_id<<8)|type, type&0x10=wall, row-major w*h. See ../schema/MAP_DATA_FORMAT.md
   }
   MapDataFormat map_data_format = 18;
   uint32   seq_id        = 22;

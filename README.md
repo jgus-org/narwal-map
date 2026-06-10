@@ -26,15 +26,21 @@ Helper: `get_two_rooms_crossing_point` makes the robot return the doorway points
 ## Status
 
 - [x] Protocol + message schemas fully reverse-engineered (offline).
-- [ ] **Live `get_editable_map` read** — pending. Confirms coordinate frame (`Point` world-vs-grid units), live `map_id`/`edit_version`, `EditConfig.max_room_nums`, and `OpResult`/`OpErrorCode` enum integers. Read-only; see `tools/narwal_read.py`.
+- [x] **Live `get_editable_map` read** (firmware `v01.08.01.00`, `tools/narwal_read.py`). The whole read path works: connect → wake → `get_map` → `get_editable_map`, all `result=1` (`OpResult` SUCCESS=1). Coexists with the running HA integration — its WS-slot limit is per-client-IP and HA runs off-host, so disabling it was unnecessary from `d1`.
+  - `map_id=2`, `map_version=148`, `edit_version=45` (echoed at both `Response.edit_version` and `map.edit_version`/field 33 — consistent). `EditConfig.max_room_nums=50` (12 rooms now). `resolution=60` mm/pixel, `width=291`, `height=439`. 12 named rooms, 12 `room_contours`, 15 doors, `map_data`(17) present (3240 B), no forbiddens/virtual-walls.
+- [x] **Coordinate frame resolved.** Three coexisting frames:
+  - `Grid` (contour/door points) — `int32` signed grid pixels, e.g. x∈[−111,118], y∈[−355,26].
+  - `Point` (cut endpoints, crossing points) — **`float`/fixed32, same signed grid-pixel frame** (not int32, not metres). Confirmed by `tools/narwal_crossing.py`: crossing points decode to e.g. (78.0,−154.0) and land exactly on the `Grid` door pixels for the same room pair. `RoomSegOperation.start/end_seg_point` reuse this `Point` class → cut lines are float grid coords.
+  - `PoseData` (origin/station) — `float32` world metres + radians; origin≈(0.52,0.00,π/2), station≈(0.00,8.35,−π/2). `Border={bottom −387, top 51, left −142, right 148}` grid px (spans = height−1, width−1).
+- [x] **Map grid (`map_data`/field 17) decoded** — zlib → packed-varint `MapData`; pixel = `(room_id<<8)|type`, `type&0x10`=wall, row-major. Pixel↔grid: `col=gx−left, row=gy−bottom` (validated against live crossing points). Full spec + the HACS client's two field mislabels (`area`→`edit_version`, loose origin→`Border`) in [`schema/MAP_DATA_FORMAT.md`](schema/MAP_DATA_FORMAT.md). Decode/render any capture with `tools/decode_map.py`.
 - [ ] Build + dry-run the edit (`MapOperation` with two cuts), then send.
-- [ ] **No writes attempted.** Do not send edit/save commands until the read is decoded and the robot is confirmed re-mappable if a write misbehaves.
+- [ ] **No writes attempted.** Do not send edit/save commands until the robot is confirmed re-mappable if a write misbehaves.
 
-Robot LAN address: `narwal-test`. Device id `7228565170b34dd6a242d983f1fc0eeb`, product key `iSuVlI1If2` (topic prefix `/iSuVlI1If2`).
+Robot LAN address: `narwal-test` (172.21.40.15). Device id `7228565170b34dd6a242d983f1fc0eeb`, product key `iSuVlI1If2` (topic prefix `/iSuVlI1If2`).
 
 ## Running the live read (after reboot)
 
-The robot allows **one WS connection per client IP**, so first **disable the Narwal integration in HA** (Settings → Devices & Services → Narwal → ⋮ → Disable) to free the slot. Then:
+The robot allows **one WS connection per client IP**. Running from `d1` (HA runs off-host on another IP) needs no action — the read coexists with the live integration. Only if you run this from the *same* host/IP as HA must you first **disable the Narwal integration** (Settings → Devices & Services → Narwal → ⋮ → Disable) to free the slot. Then:
 
 ```bash
 # 1. Recreate the python deps (ephemeral; not committed)
@@ -49,7 +55,7 @@ PYTHONPATH=/tmp/narwal-pydeps:/service/home-assistant/custom_components/narwal \
 nix run "nixpkgs#protobuf" -- --decode_raw < /tmp/narwal-apk/editable_map.bin | less
 ```
 
-Re-enable the integration when done.
+Re-enable the integration afterward if you disabled it. The read tool also runs `tools/narwal_crossing.py r1:r2 …` to fetch doorway crossing points.
 
 ## Regenerating the decompile (heavy artifacts, not committed)
 
@@ -78,5 +84,6 @@ nix-shell -p cmake ninja pkg-config icu capstone git \
 - `schema/staticmap.desc` — the binary descriptor.
 - `schema/topics_all.txt` — every WebSocket topic string in the app (783).
 - `schema/error_codes.txt` — all `ERROR_CODE_*` (the robot's validation rules).
+- `schema/MAP_DATA_FORMAT.md` — decoded `map_data` grid format, coordinate frames, and HACS-client field corrections.
 - `asm/{srv_map,msg_map}/` — Blutter disassembly of the map proto messages (evidence/provenance).
-- `tools/` — `parse_pb.py` (asm→schema), `show_msg.py`, `extract_desc.py`/`harvest_desc.py` (descriptor harvest), `extract_and_scan.py` (APK→.so→strings), `narwal_read.py` (live read).
+- `tools/` — `parse_pb.py` (asm→schema), `show_msg.py`, `extract_desc.py`/`harvest_desc.py` (descriptor harvest), `extract_and_scan.py` (APK→.so→strings), `narwal_read.py` (live read), `narwal_crossing.py` (doorway crossing points), `decode_map.py` (grid decode/render).
