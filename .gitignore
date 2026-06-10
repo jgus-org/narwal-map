@@ -1,0 +1,7 @@
+# Regenerable heavy artifacts (see README "Regenerating the decompile")
+*.xapk
+*.so
+*.bin
+__pycache__/
+*.pyc
+/tmp/

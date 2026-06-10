@@ -1,0 +1,474 @@
+
+========== MapModify.pb.dart ==========
+
+message MapOperation_Response {
+  1    result                     enum  (e)
+  2    map                        message StaticMapPayload  (aOM)
+  3    editVersion                scalar  (a)
+  4    errorCode                  enum  (e)
+
+message MapOperation_Request {
+  1    mapId                      scalar  (a)
+  2    mapVersion                 scalar  (a)
+  3    editVersion                scalar  (a)
+  4    operations                 repeated message MapOperationPayload  (pc)
+  5    enableShowManualAddCarpet  bool  (aOB)
+  6    enableFloorPlanData        bool  (aOB)
+
+message MapOperationPayload {
+  ?    MapOperationPayload        ONEOF MapOperationPayload  (oo)
+  1    roomSegOperation           message RoomSegOperation  (aOM)
+  2    roomMergeOperation         message RoomMergeOperation  (aOM)
+  3    roomInfoOperation          message RoomInfoOperation  (aOM)
+  4    forbiddenAreaOperation     message ForbiddenAreaOperation  (aOM)
+  5    mapRotateOperation         message MapRotateOperation  (aOM)
+  6    carpetOperation            message CarpetOperation  (aOM)
+  7    setMapNameOperation        message SetMapNameOperation  (aOM)
+  8    setFurnitureOperation      message SetFurnitureOperation  (aOM)
+  9    floorPlanOperation         message FloorPlanOperation  (aOM)
+  10   petHeatAreaOperation       message PetHeatAreaOperation  (aOM)
+  11   thresholdOperation         message ThresholdOperation  (aOM)
+  12   slopeOperation             message SlopeOperation  (aOM)
+  13   virtualWallOperation       message VirtualWallOperation  (aOM)
+  14   noCarpetAreaOperation      message NoCarpetAreaOperation  (aOM)
+
+message FloorPlanOperation {
+  1    roomContours               repeated message RoomContour  (pc)
+
+message SetFurnitureOperation {
+  1    opt                        enum  (e)
+  2    furniture                  message Furniture  (aOM)
+
+message SetMapNameOperation {
+  1    customName                 string  (aOS)
+
+message CarpetOperation {
+  1    carpetId                   scalar  (a)
+  2    carpetCleanOption          enum  (e)
+  3    operation                  enum  (e)
+  4    carpetPolygon              repeated message Grid  (pc)
+  5    carpetModifyPolygon        repeated message Grid  (pc)
+
+message MapRotateOperation {
+  1    rotateAngle                scalar  (a)
+
+message NoCarpetAreaOperation {
+  1    operation                  enum  (e)
+  2    noCarpetArea               message NoCarpetArea  (aOM)
+
+message PetHeatAreaOperation {
+  1    operation                  enum  (e)
+  2    petHeatArea                message PetHeatArea  (aOM)
+
+message VirtualWallOperation {
+  1    operation                  enum  (e)
+  2    virtualWallData            message VirtualWallData  (aOM)
+
+message SlopeOperation {
+  1    operation                  enum  (e)
+  2    slopeData                  message SlopeData  (aOM)
+
+message ThresholdOperation {
+  1    operation                  enum  (e)
+  2    thresholdData              message ThresholdData  (aOM)
+
+message ForbiddenAreaOperation {
+  1    operation                  enum  (e)
+  2    forbidden                  message ForbiddenArea  (aOM)
+
+message RoomInfoOperation {
+  1    roomInfo                   message RoomInfo  (aOM)
+
+message RoomMergeOperation {
+  1    roomId1                    scalar  (a)
+  2    roomId2                    scalar  (a)
+  3    newRoomId                  scalar  (a)
+
+message RoomSegOperation {
+  1    startSegPoint              message Point  (aOM)
+  2    endSegPoint                message Point  (aOM)
+  3    leftRoomId                 scalar  (a)
+  4    rightRoomId                scalar  (a)
+}
+
+========== MapBaseType.pb.dart ==========
+
+message NoCarpetArea {
+  1    id                         scalar  (a)
+  2    polygon                    repeated message Grid  (pc)
+
+message VirtualWallData {
+  1    id                         scalar  (a)
+  2    startPoint                 message Point  (aOM)
+  3    endPoint                   message Point  (aOM)
+
+message SlopeData {
+  1    id                         scalar  (a)
+  2    points                     repeated message Point  (pc)
+  3    height                     scalar  (a)
+
+message Window {
+  1    windowId                   scalar  (a)
+  2    windowType                 scalar  (a)
+  3    box3d                      message BoundingBox3D  (aOM)
+  4    color                      scalar  (a)
+
+message VideoCruisePointData {
+  1    cruisePointId              scalar  (a)
+  2    videoCruisePoint           message Point  (aOM)
+  3    cruisePointStatus          enum  (e)
+  4    cruisePointRoomId          scalar  (a)
+  5    cruisePointRoomType        scalar  (a)
+  6    videoCruiseTaskId          scalar  (a)
+
+message RoomContour {
+  1    roomId                     scalar  (a)
+  2    contourPoints              repeated message Grid  (pc)
+  3    edgeType                   repeated message RoomContour_EdgeEditable  (pc)
+
+message ImageROI {
+  1    origin                     message Grid  (aOM)
+  2    width                      scalar  (a)
+  3    height                     scalar  (a)
+
+message VisionData {
+  1    funitures                  repeated message Furniture  (pc)
+  2    visionObs                  repeated message VisionObs  (pc)
+  3    visionDirty                repeated message VisionDirty  (pc)
+
+message VisionDirty {
+  1    id                         scalar  (a)
+  2    label                      enum  (e)
+  3    box                        message BoundingBox  (aOM)
+  4    status                     enum  (e)
+
+message VisionObs {
+  1    id                         scalar  (a)
+  2    label                      enum  (e)
+  3    box                        message BoundingBox  (aOM)
+  4    taskId                     scalar  (a)
+  5    VisionObs.ObjectNamesEntry map<>  (m)
+
+message Furniture {
+  1    id                         scalar  (a)
+  2    furnitureType              scalar  (a)
+  3    box                        message BoundingBox  (aOM)
+  4    angle                      scalar  (a)
+  5    isMirrored                 bool  (aOB)
+  6    box3d                      message BoundingBox3D  (aOM)
+  7    color                      scalar  (a)
+  8    texture                    enum  (e)
+  32768 ISS_furniture_type         scalar  (a)
+
+message BoundingBox3D {
+  1    center                     message Vector3D  (aOM)
+  2    size                       message Vector3D  (aOM)
+
+message BoundingBox {
+  1    center                     message Point  (aOM)
+  2    width                      scalar  (a)
+  3    height                     scalar  (a)
+
+message RobotTrajectoryInfo {
+  1    trajectoryType             enum  (e)
+  2    index                      scalar  (a)
+  3    groupId                    scalar  (a)
+  4    cleanCount                 scalar  (a)
+  5    direction                  enum  (e)
+
+message RobotTrajectoryArc {
+  1    index                      scalar  (a)
+  3    clockwise                  bool  (aOB)
+  4    centerx                    scalar  (a)
+  5    centery                    scalar  (a)
+
+message RobotTrajectoryWithInfo {
+  1    trajectory                 message RobotTrajectory  (aOM)
+  2    trajectoryInfos            repeated message RobotTrajectoryInfo  (pc)
+  3    addtionalTrajectoryType    enum  (e)
+
+message SubRoomInfo {
+  1    roomId                     scalar  (a)
+  2    subRoomId                  scalar  (a)
+  3    contours                   repeated message SubRoomContour  (pc)
+
+message SubRoomContour {
+  1    grids                      repeated message Grid  (pc)
+
+message ReducedMap {
+  1    ReducedMap.RoomContoursEntry map<>  (m)
+  4    indexes                    packed repeated  (p)
+
+message UpdateMapRegion {
+  1    region                     repeated message Grid  (pc)
+  2    id                         scalar  (a)
+  3    displayPose                message PoseData  (aOM)
+  4    updateReason               enum  (e)
+
+message MapCenterAlign {
+  1    x                          scalar  (a)
+  2    y                          scalar  (a)
+  3    width                      scalar  (a)
+  4    height                     scalar  (a)
+
+message CleanEventMsg {
+  1    cleanEvent                 enum  (e)
+  2    index                      scalar  (a)
+
+message RobotTrajectory {
+  1    ptsX                       packed repeated  (p)
+  2    ptsY                       packed repeated  (p)
+
+message GridData {
+  1    gridsIdx                   packed repeated  (p)
+  2    datas                      packed repeated  (p)
+
+message MapData {
+  1    grids                      packed repeated  (p)
+  2    debugGrids                 packed repeated  (p)
+
+message Border {
+  1    bottom                     scalar  (a)
+  2    top                        scalar  (a)
+  3    left                       scalar  (a)
+  4    right                      scalar  (a)
+
+message ZoneInfo {
+  1    mode                       enum  (e)
+  2    actualZone                 repeated message Grid  (pc)
+  3    originalZone               repeated message Grid  (pc)
+
+message RoomInfo {
+  1    roomId                     scalar  (a)
+  2    type                       scalar  (a)
+  3    customName                 string  (aOS)
+  4    texture                    enum  (e)
+  5    textureDirectionAngle      scalar  (a)
+  6    isDefaultHeavyDirtyRoom    bool  (aOB)
+  7    isCustomizeHeavyDirtyRoom  bool  (aOB)
+  8    roomTypeId                 scalar  (a)
+  9    color                      scalar  (a)
+  10   isCustomizeReduceNoise     bool  (aOB)
+  11   needTipsSilentRoom         bool  (aOB)
+
+message Door {
+  1    roomIds                    packed repeated  (p)
+  2    doorPts                    repeated message Grid  (pc)
+  3    hasDoorSill                bool  (aOB)
+  4    height                     scalar  (a)
+  5    type                       scalar  (a)
+  6    color                      scalar  (a)
+  7    theta                      scalar  (a)
+
+message Carpet {
+  1    id                         scalar  (a)
+  2    polygon                    repeated message Grid  (pc)
+  3    center                     message Grid  (aOM)
+  4    carpetCleanOption          enum  (e)
+  5    source                     enum  (e)
+  6    carpetModifyPolygon        repeated message Grid  (pc)
+  7    material                   enum  (e)
+  8    color                      scalar  (a)
+
+message PetHeatArea {
+  1    polygon                    repeated message Point  (pc)
+  2    id                         scalar  (a)
+  3    furnitureId                scalar  (a)
+  4    bindFurniture              bool  (aOB)
+
+message ThresholdData {
+  1    id                         scalar  (a)
+  2    startPoint                 message Point  (aOM)
+  3    endPoint                   message Point  (aOM)
+  4    height                     scalar  (a)
+  5    color                      scalar  (a)
+  6    setByUser                  bool  (aOB)
+
+message ForbiddenArea {
+  1    polygon                    repeated message Point  (pc)
+  2    type                       enum  (e)
+  3    id                         scalar  (a)
+  4    roomId                     scalar  (a)
+  5    mode                       enum  (e)
+
+message Contour {
+  1    pts                        repeated message Grid  (pc)
+  2    center                     message Grid  (aOM)
+
+message PoseData {
+  1    location                   message Point  (aOM)
+  2    theta                      scalar  (a)
+
+message Grid {
+  1    x                          scalar  (a)
+  2    y                          scalar  (a)
+
+message Point {
+  1    x                          scalar  (a)
+  2    y                          scalar  (a)
+
+message Vector3D {
+  1    x                          scalar  (a)
+  2    y                          scalar  (a)
+  3    z                          scalar  (a)
+}
+
+========== StaticMapPayload.pb.dart ==========
+
+message StaticMapPayload {
+  ?    StaticMapPayload           ONEOF StaticMapPayload  (oo)
+  ?    -                          ONEOF StaticMapPayload  (oo)
+  ?    -                          ONEOF StaticMapPayload  (oo)
+  1    mapId                      scalar  (a)
+  2    mapVersion                 scalar  (a)
+  3    resolution                 scalar  (a)
+  4    width                      scalar  (a)
+  5    height                     scalar  (a)
+  6    border                     message Border  (aOM)
+  7    origin                     message PoseData  (aOM)
+  8    station                    message PoseData  (aOM)
+  9    forbiddens                 repeated message ForbiddenArea  (pc)
+  10   zoneInfos                  repeated message ZoneInfo  (pc)
+  11   doors                      repeated message Door  (pc)
+  12   roomInfos                  repeated message RoomInfo  (pc)
+  13   trajectory                 message RobotTrajectory  (aOM)
+  14   robotTrajectory            scalar  (a)
+  15   robotTrajectoryFormat      enum  (e)
+  16   map                        message MapData  (aOM)
+  17   mapData                    scalar  (a)
+  18   mapDataFormat              enum  (e)
+  19   isBuildingMap              bool  (aOB)
+  20   mapValidBit                scalar  (a)
+  21   mapCenterAlignData         message MapCenterAlign  (aOM)
+  22   seqId                      scalar  (a)
+  23   showStationDirection       bool  (aOB)
+  24   robotPose                  message PoseData  (aOM)
+  25   rotateAngle                scalar  (a)
+  26   carpets                    repeated message Carpet  (pc)
+  27   updateMapRegions           repeated message UpdateMapRegion  (pc)
+  28   customName                 string  (aOS)
+  29   reducedMap                 message ReducedMap  (aOM)
+  30   isMainMap                  bool  (aOB)
+  31   trajectoryInfos            repeated message RobotTrajectoryInfo  (pc)
+  32   visionData                 message VisionData  (aOM)
+  33   editVersion                scalar  (a)
+  34   mapGenerateTime            scalar  (a)
+  35   enableCleanTrajectoryDisplay bool  (aOB)
+  36   robotPoseUpdateTime        scalar  (a)
+  37   isTempMap                  bool  (aOB)
+  38   roomContours               repeated message RoomContour  (pc)
+  39   videoCruisePointData       repeated message VideoCruisePointData  (pc)
+  40   petHeatAreas               repeated message PetHeatArea  (pc)
+  41   thresholds                 repeated message ThresholdData  (pc)
+  42   windows                    repeated message Window  (pc)
+  43   trajectoryArcs             repeated message RobotTrajectoryArc  (pc)
+  44   originTrajectory           message RobotTrajectory  (aOM)
+  45   originRobotTrajectory      scalar  (a)
+  46   originTrajectoryInfos      repeated message RobotTrajectoryInfo  (pc)
+  47   robotTrappedPoints         repeated message Point  (pc)
+  48   exceptionInfoList          repeated message ExceptionInfo  (pc)
+  49   slopes                     repeated message SlopeData  (pc)
+  50   virtualWalls               repeated message VirtualWallData  (pc)
+  51   noCarpetAreas              repeated message NoCarpetArea  (pc)
+}
+
+========== GetEditableMap.pb.dart ==========
+
+message GetEditableMap_Response {
+  1    result                     enum  (e)
+  2    map                        message StaticMapPayload  (aOM)
+  3    editVersion                scalar  (a)
+  4    editConfig                 message EditConfig  (aOM)
+
+message GetEditableMap_Request {
+  1    mapId                      scalar  (a)
+  2    enableShowManualAddCarpet  bool  (aOB)
+  3    enableFloorPlanData        bool  (aOB)
+
+message EditConfig {
+  1    maxRoomNums                scalar  (a)
+}
+
+========== GetMap.pb.dart ==========
+
+message GetMap_Response {
+  1    result                     enum  (e)
+  2    map                        message StaticMapPayload  (aOM)
+  3    robotHasMap                bool  (aOB)
+
+message GetMap_Request {
+  1    requestType                enum  (e)
+  2    enableShowManualAddCarpet  bool  (aOB)
+}
+
+========== SaveMapUpdate.pb.dart ==========
+
+message SaveMapUpdate_Response {
+  1    result                     bool  (aOB)
+
+message SaveMapUpdate_Request {
+}
+
+========== SetUpdateMapRegions.pb.dart ==========
+
+message SetUpdateMapRegions_Response {
+  1    result                     enum  (e)
+
+message SetUpdateMapRegions_Request {
+  1    mapId                      scalar  (a)
+  2    regions                    repeated message EditMapRegion  (pc)
+
+message EditMapRegion {
+  1    opt                        enum  (e)
+  2    region                     message UpdateMapRegion  (aOM)
+}
+
+========== StartUpdateMap.pb.dart ==========
+
+message StartUpdateMap_Response {
+  1    result                     enum  (e)
+  2    taskId                     scalar  (a)
+
+message StartUpdateMap_Request {
+  1    mapId                      scalar  (a)
+  2    regions                    repeated message UpdateMapRegion  (pc)
+}
+
+========== CheckMapUpdate.pb.dart ==========
+
+message CheckMapUpdate_Response {
+  1    result                     bool  (aOB)
+  2    map                        message StaticMapPayload  (aOM)
+
+message CheckMapUpdate_Request {
+}
+
+========== SwitchMap.pb.dart ==========
+
+message SwitchMap_Response {
+  1    result                     enum  (e)
+
+message SwitchMap_Request {
+  1    mapId                      scalar  (a)
+}
+
+========== DeleteMap.pb.dart ==========
+
+message DeleteMap_Response {
+  1    result                     enum  (e)
+  2    currentUseMapId            scalar  (a)
+
+message DeleteMap_Request {
+  1    mapId                      scalar  (a)
+}
+
+========== GetTwoRoomsCrossingPoint.pb.dart ==========
+
+message GetTwoRoomsCrossingPoint_Response {
+  1    point_1                    message Point  (aOM)
+  2    point_2                    message Point  (aOM)
+
+message GetTwoRoomsCrossingPoint_Request {
+  32768 room_id_1                  scalar  (a)
+  32768 room_id_2                  scalar  (a)
+}

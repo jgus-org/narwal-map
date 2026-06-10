@@ -1,0 +1,197 @@
+// Narwal Flow robot vacuum — local map-edit protocol (reverse-engineered).
+//
+// Source: decompiled Android app com.narwal.pita_global (Flutter, Dart 3.9.2),
+// proto package octopus.mqtt.msg / octopus.core. Field numbers/types for
+// StaticMapPayload are descriptor-confirmed (schema/StaticMapPayload.descriptor.txt);
+// the rest are recovered from Blutter BuilderInfo disassembly (asm/) and validated
+// where a descriptor existed. Scalar int subtypes (int32/uint32/sint32) are best-effort
+// unless descriptor-confirmed — confirm against a live get_editable_map capture.
+//
+// Transport: unauthenticated WebSocket ws://<robot>:9002. Frame = 0x01, (topic_len+2),
+// 0x22, topic_len, UTF-8 topic, protobuf payload. Topics are "/<product_key>/<device_id>/<short>".
+// Requests use field-tag 0x22; responses 0x2A. See ../README.md.
+
+syntax = "proto3";
+package octopus.mqtt.msg;
+
+// ---- geometry / shared ----
+
+message Point {            // used for cut-line endpoints, forbidden polygons, trapped points
+  int32 x = 1;             // units TBD: confirm world-vs-grid against live data
+  int32 y = 2;
+}
+
+message Grid {             // used for room-contour points, door points (grid/pixel coords)
+  int32 x = 1;
+  int32 y = 2;
+}
+
+message PoseData { /* origin/station/robot pose; x,y(,theta) — see asm/msg_map */ }
+message Border   { /* map bounding box — see asm/msg_map/MapBaseType */ }
+
+message RoomInfo {
+  int32  room_id     = 1;
+  int32  type        = 2;
+  string custom_name = 3;
+  RoomTexture texture = 4;          // enum
+  int32  texture_direction_angle = 5;
+  bool   is_default_heavy_dirty_room   = 6;
+  bool   is_customize_heavy_dirty_room = 7;
+  int32  room_type_id = 8;
+  int32  color        = 9;
+  bool   is_customize_reduce_noise = 10;
+  bool   need_tips_silent_room     = 11;
+}
+
+message RoomContour {                       // explicit room boundary polygon
+  int32              room_id        = 1;
+  repeated Grid      contour_points = 2;
+  repeated RoomContour_EdgeEditable edge_type = 3;
+}
+
+message ForbiddenArea {
+  repeated Point polygon = 1;
+  ForbiddenType  type    = 2;   // enum
+  int32          id      = 3;
+  int32          room_id = 4;
+  ForbiddenMode  mode    = 5;   // enum
+}
+
+message Door {
+  repeated int32 room_ids       = 1;
+  repeated Grid  door_pts       = 2;
+  bool           has_door_sill  = 3;
+  int32          height         = 4;
+  int32          type           = 5;
+  int32          color          = 6;
+  int32          theta          = 7;
+}
+
+message MapData {              // structured grid (alternative to StaticMapPayload.map_data bytes)
+  repeated uint32 grids       = 1 [packed = true];   // per-pixel (room_id<<8)|pixel_type
+  repeated uint32 debug_grids = 2 [packed = true];
+}
+
+// The map container, returned by get_map / get_editable_map and pushed by save_map_update_info.
+// Partial — full field set (50+) in schema/StaticMapPayload.descriptor.txt.
+message StaticMapPayload {
+  int32    map_id        = 1;
+  uint32   map_version   = 2;
+  int32    resolution    = 3;   // mm/pixel
+  int32    width         = 4;
+  int32    height        = 5;
+  Border   border        = 6;
+  PoseData origin        = 7;
+  PoseData station       = 8;
+  repeated ForbiddenArea forbiddens = 9;
+  repeated Door          doors      = 11;
+  repeated RoomInfo      room_infos = 12;
+  oneof map_data_oneof {
+    MapData map      = 16;      // structured grid
+    bytes   map_data = 17;      // zlib-compressed packed-varint grid (what the HACS client decodes)
+  }
+  MapDataFormat map_data_format = 18;
+  uint32   seq_id        = 22;
+  string   custom_name   = 28;
+  bool     is_main_map   = 30;
+  uint32   edit_version  = 33;  // optimistic-concurrency token; echo back on edit/save
+  repeated RoomContour   room_contours = 38;
+  repeated VirtualWallData virtual_walls = 50;
+}
+
+message EditConfig { int32 max_room_nums = 1; }   // server-advertised edit constraints
+
+// ---- edit operations (MapModify) ----
+
+message RoomSegOperation {        // split: one cut line -> two room ids
+  Point start_seg_point = 1;
+  Point end_seg_point   = 2;
+  int32 left_room_id    = 3;
+  int32 right_room_id   = 4;
+}
+
+message RoomMergeOperation {      // merge two adjacent rooms
+  int32 room_id1    = 1;
+  int32 room_id2    = 2;
+  int32 new_room_id = 3;
+}
+
+message RoomInfoOperation { RoomInfo room_info = 1; }   // rename / retype
+message FloorPlanOperation { repeated RoomContour room_contours = 1; }   // define rooms as polygons
+
+message MapOperationPayload {     // one edit op (oneof)
+  oneof op {
+    RoomSegOperation      room_seg_operation       = 1;
+    RoomMergeOperation    room_merge_operation     = 2;
+    RoomInfoOperation     room_info_operation      = 3;
+    ForbiddenAreaOperation forbidden_area_operation = 4;
+    MapRotateOperation    map_rotate_operation     = 5;
+    CarpetOperation       carpet_operation         = 6;
+    SetMapNameOperation   set_map_name_operation   = 7;
+    SetFurnitureOperation set_furniture_operation  = 8;
+    FloorPlanOperation    floor_plan_operation     = 9;
+    PetHeatAreaOperation  pet_heat_area_operation  = 10;
+    ThresholdOperation    threshold_operation      = 11;
+    SlopeOperation        slope_operation          = 12;
+    VirtualWallOperation  virtual_wall_operation   = 13;
+    NoCarpetAreaOperation no_carpet_area_operation = 14;
+  }
+}
+
+// topic: /map/operation  (also /map_edit, /room_split_and_merge)
+message MapOperation {
+  message Request {
+    int32  map_id       = 1;
+    uint32 map_version  = 2;
+    uint32 edit_version = 3;                         // echo from get_editable_map
+    repeated MapOperationPayload operations = 4;     // *** applied together: multiple cuts in one request ***
+    bool   enable_show_manual_add_carpet = 5;
+    bool   enable_floor_plan_data        = 6;
+  }
+  message Response {
+    OpResult         result       = 1;   // enum
+    StaticMapPayload map          = 2;   // re-segmented result
+    uint32           edit_version = 3;   // new version
+    OpErrorCode      error_code   = 4;   // enum (see schema/error_codes.txt)
+  }
+}
+
+// topic: /map/get_editable_map
+message GetEditableMap {
+  message Request {
+    int32 map_id = 1;
+    bool  enable_show_manual_add_carpet = 2;
+    bool  enable_floor_plan_data        = 3;
+  }
+  message Response {
+    OpResult         result       = 1;
+    StaticMapPayload map          = 2;
+    uint32           edit_version = 3;
+    EditConfig       edit_config  = 4;
+  }
+}
+
+// topic: /map/save_map_update_info  (Request has no scalar fields; commits staged regions)
+message SaveMapUpdate {
+  message Request {}
+  message Response { bool result = 1; }
+}
+
+// topic: /map/set_update_regions
+message SetUpdateMapRegions {
+  message Request {
+    int32 map_id = 1;
+    repeated EditMapRegion regions = 2;
+  }
+  message Response { OpResult result = 1; }
+}
+
+// topic: /telecontrol/get_two_rooms_crossing_point  (finds the doorway points between two rooms)
+message GetTwoRoomsCrossingPoint {
+  message Request  { int32 room_id_1 = 1; int32 room_id_2 = 2; }
+  message Response { Point point_1 = 1; Point point_2 = 2; }
+}
+
+// Referenced but not transcribed here (see asm/): RoomTexture, RoomContour_EdgeEditable,
+// ForbiddenType, ForbiddenMode, MapDataFormat, OpResult, OpErrorCode, VirtualWallData,
+// EditMapRegion, *Operation payloads (4,5,6,7,8,10,11,12,13,14).
