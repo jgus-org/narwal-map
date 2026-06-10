@@ -18,58 +18,15 @@ import sys
 
 sys.path.insert(0, "/tmp/narwal-pydeps")
 sys.path.insert(0, "/service/home-assistant/custom_components/narwal")
+sys.path.insert(0, str(__import__("pathlib").Path(__file__).resolve().parent))
 
 import blackboxprotobuf as bbp  # noqa: E402
 from narwal_client import NarwalClient  # noqa: E402
+from narwal_ops import build_operation_request, room_seg_payload, varint  # noqa: E402
 
 HOST = "narwal-test"
 DEVICE_ID = "7228565170b34dd6a242d983f1fc0eeb"
 PREFIX = "/iSuVlI1If2"
-
-
-def varint(n: int) -> bytes:
-    out = bytearray()
-    while True:
-        b = n & 0x7F
-        n >>= 7
-        out.append(b | (0x80 if n else 0))
-        if not n:
-            return bytes(out)
-
-
-def tag(field: int, wire: int) -> bytes:
-    return varint((field << 3) | wire)
-
-
-def length_delimited(field: int, body: bytes) -> bytes:
-    return tag(field, 2) + varint(len(body)) + body
-
-
-def f32(field: int, value: float) -> bytes:
-    return tag(field, 5) + struct.pack("<f", value)
-
-
-def point(x: float, y: float) -> bytes:
-    return f32(1, x) + f32(2, y)
-
-
-def room_seg_op(x0, y0, x1, y1, left_id, right_id) -> bytes:
-    body = (
-        length_delimited(1, point(x0, y0))
-        + length_delimited(2, point(x1, y1))
-        + tag(3, 0) + varint(left_id)
-        + tag(4, 0) + varint(right_id)
-    )
-    return length_delimited(1, body)  # MapOperationPayload{1: roomSegOperation}
-
-
-def build_request(map_id, map_version, edit_version, op_payload) -> bytes:
-    return (
-        tag(1, 0) + varint(map_id)
-        + tag(2, 0) + varint(map_version)
-        + tag(3, 0) + varint(edit_version)
-        + length_delimited(4, op_payload)  # operations[0]
-    )
 
 
 def deep(d, *ks):
@@ -91,7 +48,7 @@ async def main() -> int:
     ap.add_argument("--save", action="store_true", help="also send save_map_update_info to commit")
     a = ap.parse_args()
 
-    op = room_seg_op(a.x, a.y0, a.x, a.y1, a.left, a.right)
+    op = room_seg_payload(a.x, a.y0, a.x, a.y1, a.left, a.right)
 
     client = NarwalClient(HOST, device_id=DEVICE_ID, topic_prefix=PREFIX)
     await client.connect()
@@ -111,7 +68,7 @@ async def main() -> int:
         print(f"fresh editable map: map_id={map_id} map_version={map_version} "
               f"edit_version={edit_version} rooms={n_rooms}")
 
-        req = build_request(map_id, map_version, edit_version, op)
+        req = build_operation_request(map_id, map_version, edit_version, [op])
         print(f"\ncut: vertical x={a.x} y[{a.y0}..{a.y1}] left_room={a.left} right_room={a.right}")
         print(f"request ({len(req)} B): {req.hex()}")
         back, _ = bbp.decode_message(req)

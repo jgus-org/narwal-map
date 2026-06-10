@@ -1,0 +1,349 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Narwal map edit</title>
+<style>
+  html, body { height:100%; }
+  body { background:#15161c; color:#d8dae0; font:14px/1.4 system-ui, sans-serif; margin:0; display:flex; }
+  #side { width:250px; padding:14px; box-sizing:border-box; border-right:1px solid #2a2c36; height:100vh; overflow:auto; }
+  #main { flex:1; position:relative; overflow:hidden; }
+  #cv { display:block; background:#0e0f14; touch-action:none; cursor:crosshair; }
+  h1 { font-size:15px; margin:0 0 10px; }
+  button { background:#2a2c36; color:#d8dae0; border:1px solid #3a3d4a; border-radius:6px; padding:6px 10px; cursor:pointer; }
+  button.on { background:#3b6ea5; border-color:#4d86c6; }
+  button:hover { border-color:#5a5e70; }
+  button:disabled { opacity:.4; cursor:default; }
+  button.apply { background:#3a7d3a; border-color:#4f9d4f; }
+  .row { margin:8px 0; display:flex; gap:6px; flex-wrap:wrap; }
+  #status { margin-top:10px; padding:8px; background:#1d1f28; border-radius:6px; min-height:18px; white-space:pre-wrap; }
+  #status.err { color:#ff8d8d; } #status.ok { color:#8de08d; }
+  #readout { margin-top:8px; font-size:12px; color:#b8bbc8; white-space:pre-wrap; min-height:46px; }
+  #legend { margin-top:8px; font-size:12px; display:none; } body.cut #legend { display:block; }
+  #legend .sw { width:11px; height:11px; border-radius:2px; display:inline-block; vertical-align:-1px; margin-right:4px; }
+  #rooms { margin-top:10px; } .rm { display:flex; align-items:center; gap:6px; padding:2px 0; }
+  .sw { width:12px; height:12px; border-radius:2px; display:inline-block; }
+  .hint { color:#9a9db0; font-size:12px; }
+  .cut-only { display:none; } body.cut .cut-only { display:flex; }
+</style>
+</head>
+<body class="cut">
+<div id="side">
+  <h1>Narwal map edit</h1>
+  <div class="row">
+    <button id="mCut" class="on">Cut</button>
+    <button id="mMerge">Merge</button>
+    <button id="reload">Reload</button>
+  </div>
+  <div class="hint" id="modehint"></div>
+  <div class="row cut-only">
+    <button id="snapV">Snap ↕</button>
+    <button id="snapH">Snap ↔</button>
+    <button id="newline">New line</button>
+  </div>
+  <div class="row cut-only"><button id="apply" class="apply" disabled>Apply cut</button></div>
+  <div class="row"><button id="fit">Fit view</button><span class="hint">scroll = zoom · drag empty = pan</span></div>
+  <div id="legend">
+    <div><span class="sw" style="background:rgb(80,170,90)"></span>kept piece
+         <span class="sw" style="background:rgb(80,130,210);margin-left:8px"></span>new piece
+         <span class="sw" style="background:rgb(232,120,48);margin-left:8px"></span>extra (→ SEG_MULTI_ROOM)</div>
+  </div>
+  <div id="readout"></div>
+  <div id="status"></div>
+  <div id="rooms"></div>
+</div>
+<div id="main"><canvas id="cv"></canvas></div>
+
+<script>
+const HANDLE = 6;
+let M = null, mode = "cut";
+let line = null;          // {a:[gx,gy], b:[gx,gy]|null}
+let hover = null;         // [gx,gy] preview while placing the 2nd point
+let mergeSel = [];
+let ptr = null;           // active pointer gesture
+let view = { zoom: 2, panX: 0, panY: 0 };
+let cutOverlay = null;    // {roomId, piece:Int16Array, sizes:[]}
+let _cutKey = "", _mapCanvas = null, _mapKey = null, _fitted = false;
+const cv = document.getElementById("cv"), ctx = cv.getContext("2d");
+const main = document.getElementById("main");
+const $ = id => document.getElementById(id);
+
+function hsl(roomId, wall) {
+  if (roomId === 0) return [34, 36, 44];
+  const h = (roomId*53)%360, s = 0.55, l = wall ? 0.34 : 0.62;
+  const c = (1-Math.abs(2*l-1))*s, x = c*(1-Math.abs((h/60)%2-1)), m = l-c/2;
+  const [r,g,b] = h<60?[c,x,0]:h<120?[x,c,0]:h<180?[0,c,x]:h<240?[0,x,c]:h<300?[x,0,c]:[c,0,x];
+  return [(r+m)*255, (g+m)*255, (b+m)*255];
+}
+function pieceColor(rank) {            // rank by size: 0 kept, 1 new, 2+ extra (the problem)
+  if (rank < 0) return [70, 72, 82];   // the cut line itself, within the room
+  if (rank === 0) return [80, 170, 90];
+  if (rank === 1) return [80, 130, 210];
+  return [232, 120, 48];
+}
+
+// ---- view transform (image pixel <-> screen) ----
+const evImg = e => [(e.offsetX - view.panX)/view.zoom, (e.offsetY - view.panY)/view.zoom];
+const evGrid = e => { const [c,r] = evImg(e); return [Math.floor(c)+M.left, Math.floor(r)+M.bottom]; };
+const g2s = g => [(g[0]-M.left+0.5)*view.zoom + view.panX, (g[1]-M.bottom+0.5)*view.zoom + view.panY];
+const pixAt = (c,r) => (c<0||r<0||c>=M.width||r>=M.height) ? 0 : M.pixels[r*M.width+c];
+const lineComplete = () => line && line.a && line.b;
+const nextId = () => Math.max(0, ...M.rooms.map(r=>r.id)) + 1;
+
+// ---- connectivity: how the cut splits the target room ----
+// The robot walls off the line *segment* A–B (not an infinite line), then re-segments by
+// connected floor. So: mark floor under the segment as wall, count the remaining components.
+function computeCutOverlay(a, b, roomId) {
+  const w=M.width, h=M.height, px=M.pixels, N=w*h;
+  const ax=a[0], ay=a[1], dx=b[0]-a[0], dy=b[1]-a[1], L2=dx*dx+dy*dy||1;
+  const floor=new Uint8Array(N), piece=new Int16Array(N).fill(-1);
+  for (let r=0;r<h;r++) { const base=r*w, gy=r+M.bottom;
+    for (let c=0;c<w;c++) { const v=px[base+c];
+      if ((v>>8)!==roomId || (v&0x10)) continue;                  // only target-room floor
+      const gx=c+M.left;
+      let t=((gx-ax)*dx+(gy-ay)*dy)/L2; const on=t>=0&&t<=1; t=t<0?0:t>1?1:t;
+      const ex=gx-(ax+t*dx), ey=gy-(ay+t*dy);
+      if (on && ex*ex+ey*ey < 0.81) continue;                     // under the segment → barrier
+      floor[base+c]=1;
+    }
+  }
+  const seen=new Uint8Array(N), stack=[], compSizes=[]; let cid=0;
+  for (let i=0;i<N;i++) {
+    if (floor[i] && !seen[i]) {
+      let sz=0; stack.length=0; stack.push(i); seen[i]=1;
+      while (stack.length) { const j=stack.pop(); piece[j]=cid; sz++; const c=j%w;
+        if (c>0 && floor[j-1] && !seen[j-1]) { seen[j-1]=1; stack.push(j-1); }
+        if (c<w-1 && floor[j+1] && !seen[j+1]) { seen[j+1]=1; stack.push(j+1); }
+        if (j-w>=0 && floor[j-w] && !seen[j-w]) { seen[j-w]=1; stack.push(j-w); }
+        if (j+w<N && floor[j+w] && !seen[j+w]) { seen[j+w]=1; stack.push(j+w); }
+      }
+      compSizes.push(sz); cid++;
+    }
+  }
+  const order=[...compSizes.keys()].sort((x,y)=>compSizes[y]-compSizes[x]);
+  const rank=new Int16Array(cid); order.forEach((id,r)=>rank[id]=r);
+  for (let i=0;i<N;i++) if (piece[i]>=0) piece[i]=rank[piece[i]];
+  return { roomId, piece, sizes: order.map(id=>compSizes[id]) };
+}
+function recomputeCut() {
+  const key = (mode==="cut" && lineComplete()) ? `${line.a}|${line.b}` : "";
+  if (key === _cutKey) return;
+  _cutKey = key; cutOverlay = null;
+  if (!key) return;
+  const roomId = roomAlong(line.a, line.b);
+  if (roomId) cutOverlay = computeCutOverlay(line.a, line.b, roomId);
+}
+
+// ---- rendering ----
+function buildMapImage() {
+  recomputeCut();
+  const key = `${mode}|${mergeSel.join(",")}|${_cutKey}`;
+  if (key === _mapKey && _mapCanvas) return;
+  _mapKey = key;
+  const w=M.width, h=M.height, off=new OffscreenCanvas(w,h), octx=off.getContext("2d");
+  const img=octx.createImageData(w,h), d=img.data, ov=cutOverlay;
+  for (let i=0;i<M.pixels.length;i++) {
+    const v=M.pixels[i], room=v>>8, wall=v&0x10; let col;
+    if (ov) {
+      if (room===ov.roomId) col = wall ? [60,62,72] : pieceColor(ov.piece[i]);
+      else if (room) { const rc=hsl(room,wall); col=[(rc[0]+44)/2, (rc[1]+46)/2, (rc[2]+54)/2]; } // 50% toward grey
+      else col=[24,25,31];
+    } else {
+      col = hsl(room, wall);
+      if (mode==="merge" && room && mergeSel.includes(room))
+        col = [Math.min(255,col[0]+90), Math.min(255,col[1]+90), Math.min(255,col[2]+90)];
+    }
+    d[i*4]=col[0]; d[i*4+1]=col[1]; d[i*4+2]=col[2]; d[i*4+3]=255;
+  }
+  octx.putImageData(img, 0, 0); _mapCanvas = off;
+}
+function render() {
+  if (!M) return;
+  buildMapImage();
+  ctx.fillStyle = "#0e0f14"; ctx.fillRect(0, 0, cv.width, cv.height);
+  ctx.imageSmoothingEnabled = false;
+  ctx.drawImage(_mapCanvas, view.panX, view.panY, M.width*view.zoom, M.height*view.zoom);
+  if (mode === "cut" && line) {
+    const a = g2s(line.a), b = line.b ? g2s(line.b) : (hover ? g2s(hover) : null);
+    if (b) { ctx.strokeStyle="#ffd24d"; ctx.lineWidth=2; ctx.setLineDash(line.b?[]:[5,4]);
+      ctx.beginPath(); ctx.moveTo(a[0],a[1]); ctx.lineTo(b[0],b[1]); ctx.stroke(); ctx.setLineDash([]); }
+    ctx.fillStyle = "#ffd24d";
+    for (const p of [a, line.b?b:null]) if (p) { ctx.beginPath(); ctx.arc(p[0],p[1],HANDLE,0,7); ctx.fill(); }
+  }
+}
+function fitView() {
+  view.zoom = Math.min(cv.width/M.width, cv.height/M.height) * 0.96;
+  view.panX = (cv.width - M.width*view.zoom)/2;
+  view.panY = (cv.height - M.height*view.zoom)/2;
+}
+function resize() { cv.width = main.clientWidth; cv.height = main.clientHeight; render(); }
+
+function updateReadout() {
+  if (mode !== "cut") { $("readout").textContent = ""; return; }
+  if (!lineComplete()) { $("readout").textContent = line ? "click to place the other end" : "click two points to start a cut line"; return; }
+  recomputeCut();
+  const orig = roomAlong(line.a, line.b), newId = nextId(), crossed = roomsOnLine(line.a, line.b);
+  const rm = M.rooms.find(r=>r.id===orig);
+  const len = Math.hypot(line.b[0]-line.a[0], line.b[1]-line.a[1]) * M.resolution/1000;
+  let verdict = "";
+  if (crossed.length > 1)
+    verdict = `\n✗ line enters rooms ${crossed.map(i=>"#"+i).join(", ")} → SEG_MULTI_ROOM`;
+  else if (cutOverlay) {
+    const s = cutOverlay.sizes, n = s.length;
+    verdict = n===2 ? `\n✓ splits into 2 pieces (${s.join(", ")} px)`
+            : n>2  ? `\n✗ ${n} pieces (${s.slice(0,5).join(", ")}${n>5?"…":""}) — extra in orange → SEG_MULTI_ROOM`
+                   : `\n✗ doesn't divide the room (${n} piece)`;
+  }
+  $("readout").textContent =
+    `A (${line.a[0]}, ${line.a[1]})  B (${line.b[0]}, ${line.b[1]})  ·  ${len.toFixed(2)} m\n`+
+    `cuts #${orig} ${rm?(rm.name||"(unnamed)"):"?"} → #${orig} + new #${newId}` + verdict;
+  $("apply").disabled = !orig;
+}
+function roomsList() {
+  const el = $("rooms"); el.innerHTML = "<b>Rooms ("+M.rooms.length+")</b>";
+  for (const rm of M.rooms) {
+    const [r,g,b] = hsl(rm.id, false); const d = document.createElement("div"); d.className = "rm";
+    d.innerHTML = `<span class="sw" style="background:rgb(${r|0},${g|0},${b|0})"></span>#${rm.id} ${rm.name||"(unnamed)"}`;
+    el.appendChild(d);
+  }
+}
+function setStatus(m, cls="") { const s=$("status"); s.textContent=m; s.className=cls; }
+
+async function loadMap() {
+  setStatus("loading map…");
+  const j = await (await fetch("/api/map")).json();
+  if (j.error) return setStatus(j.error, "err");
+  const buf = Uint8Array.from(atob(j.grid), c=>c.charCodeAt(0));
+  j.pixels = new Uint16Array(buf.buffer, buf.byteOffset, buf.byteLength/2);
+  M = j; line = null; mergeSel = []; hover = null; _mapKey = null; $("apply").disabled = true;
+  resize();                                      // size the canvas buffer to the viewport
+  if (!_fitted) { fitView(); _fitted = true; }   // fit once; keep zoom/pan across later edits
+  render(); roomsList(); updateReadout();
+  setStatus(`map ${M.map_id} v${M.map_version} edit ${M.edit_version} · ${M.width}×${M.height} · ${M.rooms.length} rooms`, "ok");
+}
+
+function roomAlong(a, b) {
+  const count = {}, N = 50;
+  for (let i=0;i<=N;i++) {
+    const id = pixAt(Math.round(a[0]+(b[0]-a[0])*i/N - M.left), Math.round(a[1]+(b[1]-a[1])*i/N - M.bottom))>>8;
+    if (id) count[id] = (count[id]||0)+1;
+  }
+  const k = Object.keys(count).sort((x,y)=>count[y]-count[x])[0];
+  return k ? +k : 0;
+}
+function roomsOnLine(a, b) {
+  const ids = new Set(), N = 50;
+  for (let i=0;i<=N;i++) {
+    const id = pixAt(Math.round(a[0]+(b[0]-a[0])*i/N - M.left), Math.round(a[1]+(b[1]-a[1])*i/N - M.bottom))>>8;
+    if (id) ids.add(id);
+  }
+  return [...ids];
+}
+function distToSeg(p, a, b) {
+  const dx=b[0]-a[0], dy=b[1]-a[1], L2=dx*dx+dy*dy;
+  let t = L2 ? ((p[0]-a[0])*dx+(p[1]-a[1])*dy)/L2 : 0; t=Math.max(0,Math.min(1,t));
+  return Math.hypot(p[0]-(a[0]+t*dx), p[1]-(a[1]+t*dy));
+}
+function hitTest(px) {   // px in screen coords
+  const a = g2s(line.a), b = g2s(line.b);
+  if (Math.hypot(px[0]-a[0], px[1]-a[1]) <= HANDLE+4) return "a";
+  if (Math.hypot(px[0]-b[0], px[1]-b[1]) <= HANDLE+4) return "b";
+  if (distToSeg(px, a, b) <= 6) return "body";
+  return null;
+}
+
+// ---- pointer: drag the line to edit, drag empty space to pan, tap to place/pick ----
+cv.addEventListener("pointerdown", e => {
+  if (!M) return; cv.setPointerCapture(e.pointerId);
+  ptr = { sx:e.offsetX, sy:e.offsetY, lx:e.offsetX, ly:e.offsetY, moved:false, kind:"tap" };
+  if (e.button === 1) { ptr.kind = "pan"; return; }
+  if (mode === "cut" && lineComplete()) {
+    const what = hitTest([e.offsetX, e.offsetY]);
+    if (what) { ptr.kind = "cut"; ptr.what = what; ptr.m0 = evGrid(e); ptr.a0 = [...line.a]; ptr.b0 = [...line.b]; }
+  }
+});
+cv.addEventListener("pointermove", e => {
+  if (!M) return;
+  if (!ptr) { if (mode==="cut" && line && !line.b) { hover = evGrid(e); render(); } return; }
+  const dx=e.offsetX-ptr.lx, dy=e.offsetY-ptr.ly; ptr.lx=e.offsetX; ptr.ly=e.offsetY;
+  if (Math.abs(e.offsetX-ptr.sx)>3 || Math.abs(e.offsetY-ptr.sy)>3) ptr.moved = true;
+  if (ptr.kind==="pan" || (ptr.kind==="tap" && ptr.moved)) { view.panX+=dx; view.panY+=dy; render(); return; }
+  if (ptr.kind==="cut") {
+    const g = evGrid(e);
+    if (ptr.what==="body") { const ddx=g[0]-ptr.m0[0], ddy=g[1]-ptr.m0[1];
+      line.a=[ptr.a0[0]+ddx, ptr.a0[1]+ddy]; line.b=[ptr.b0[0]+ddx, ptr.b0[1]+ddy]; }
+    else { let np=[...g]; const other=line[ptr.what==="a"?"b":"a"];
+      if (e.shiftKey) { if (Math.abs(np[0]-other[0]) < Math.abs(np[1]-other[1])) np[0]=other[0]; else np[1]=other[1]; }
+      line[ptr.what]=np; }
+    render(); updateReadout();
+  }
+});
+cv.addEventListener("pointerup", e => {
+  if (!M || !ptr) return;
+  if (ptr.kind==="tap" && !ptr.moved) {
+    const g = evGrid(e);
+    if (mode==="merge") pickRoom(g);
+    else { if (!line) line={a:g,b:null}; else if (!line.b) line.b=g; render(); updateReadout(); }
+  }
+  ptr = null;
+});
+cv.addEventListener("wheel", e => {
+  if (!M) return; e.preventDefault();
+  const f = e.deltaY<0 ? 1.15 : 1/1.15, nz = Math.max(0.4, Math.min(24, view.zoom*f));
+  view.panX = e.offsetX - (e.offsetX-view.panX)*(nz/view.zoom);
+  view.panY = e.offsetY - (e.offsetY-view.panY)*(nz/view.zoom);
+  view.zoom = nz; render();
+}, { passive:false });
+
+function pickRoom(g) {
+  const here = pixAt(g[0]-M.left, g[1]-M.bottom)>>8;
+  if (!here) return setStatus("clicked empty space — pick a room", "err");
+  if (!mergeSel.includes(here)) mergeSel.push(here);
+  if (mergeSel.length > 2) mergeSel = [here];
+  _mapKey = null; render();
+  if (mergeSel.length === 2) {
+    const [a,b] = mergeSel;
+    if (confirm(`Merge #${a} and #${b} into #${a}?`)) send("/api/merge", {room1:a, room2:b, new_id:a});
+    else { mergeSel=[]; _mapKey=null; render(); }
+  }
+}
+
+async function send(url, body) {
+  setStatus("sending…");
+  const res = await (await fetch(url, {method:"POST", headers:{"content-type":"application/json"}, body:JSON.stringify(body)})).json();
+  if (res.dry) { setStatus("DRY RUN ok · "+res.request, "ok"); return; }
+  if (res.ok) { setStatus(`OK · edit_version→${res.edit_version} · rooms ${res.rooms}`, "ok"); await loadMap(); }
+  else setStatus(`REJECTED · ${res.result_name||res.result} / ${res.error_name||res.error_code}\n${res.diag||res.error||""}\n(adjust the line and Apply again)`, "err");
+}
+
+$("apply").onclick = () => {
+  if (!lineComplete()) return;
+  const orig = roomAlong(line.a, line.b); if (!orig) return setStatus("line isn't inside a room", "err");
+  const crossed = roomsOnLine(line.a, line.b);
+  if (crossed.length > 1 && !confirm(`Line enters rooms ${crossed.map(i=>"#"+i).join(", ")} — robot will reject as SEG_MULTI_ROOM. Send anyway?`)) return;
+  const n = (cutOverlay && cutOverlay.roomId===orig ? cutOverlay : computeCutOverlay(line.a, line.b, orig)).sizes.length;
+  if (n !== 2 && !confirm(`This cut would split #${orig} into ${n} piece(s), not 2 — robot needs exactly 2 (SEG_MULTI_ROOM otherwise). Send anyway?`)) return;
+  send("/api/cut", {x0:line.a[0], y0:line.a[1], x1:line.b[0], y1:line.b[1], left:orig, right:nextId()});
+};
+$("snapV").onclick = () => { if(!lineComplete())return; const mx=Math.round((line.a[0]+line.b[0])/2); line.a[0]=mx; line.b[0]=mx; render(); updateReadout(); };
+$("snapH").onclick = () => { if(!lineComplete())return; const my=Math.round((line.a[1]+line.b[1])/2); line.a[1]=my; line.b[1]=my; render(); updateReadout(); };
+$("newline").onclick = () => { line=null; hover=null; $("apply").disabled=true; render(); updateReadout(); };
+$("fit").onclick = () => { fitView(); render(); };
+
+function setMode(m) {
+  mode = m; line=null; mergeSel=[]; hover=null; ptr=null; _mapKey=null; $("apply").disabled=true;
+  document.body.className = m;
+  $("mCut").classList.toggle("on", m==="cut"); $("mMerge").classList.toggle("on", m==="merge");
+  $("modehint").innerHTML = m==="cut"
+    ? "Click two points for a cut line, then drag its ends/body. Other rooms grey out; the two new pieces show green/blue, any extra piece orange. <kbd>Shift</kbd>-drag = axis-aligned."
+    : "Click two adjacent rooms to merge them.";
+  if (M) { render(); updateReadout(); }
+}
+$("mCut").onclick = () => setMode("cut");
+$("mMerge").onclick = () => setMode("merge");
+$("reload").onclick = loadMap;
+window.addEventListener("resize", resize);
+setMode("cut"); loadMap();
+</script>
+</body>
+</html>

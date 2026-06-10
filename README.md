@@ -45,7 +45,7 @@ The robot allows **one WS connection per client IP**. Running from `d1` (HA runs
 ```bash
 # 1. Recreate the python deps (ephemeral; not committed)
 nix-shell -p "python3.withPackages(ps: with ps; [pip])" \
-  --run "python -m pip install --target=/tmp/narwal-pydeps bbpb websockets"
+  --run "python -m pip install --target=/tmp/narwal-pydeps bbpb websockets aiohttp"
 
 # 2. Run the read (uses the bundled narwal_client on /service, which survives reboot)
 PYTHONPATH=/tmp/narwal-pydeps:/service/home-assistant/custom_components/narwal \
@@ -56,6 +56,19 @@ nix run "nixpkgs#protobuf" -- --decode_raw < /tmp/narwal-apk/editable_map.bin | 
 ```
 
 Re-enable the integration afterward if you disabled it. The read tool also runs `tools/narwal_crossing.py r1:r2 …` to fetch doorway crossing points.
+
+## Map-edit web tool
+
+A local click-to-cut / click-to-merge UI — the stock app's primitives without its restrictions (notably: cuts may cross interior obstacle "islands"). Every edit goes through the robot's validated `/map/operation` + `save_map_update_info` path; the robot recomputes segmentation.
+
+```bash
+nix run .                              # from the repo root; then open http://localhost:8765
+nix run . -- --dry-run --port 8771     # server flags go after --
+```
+
+The flake (`flake.nix`) bundles the Python deps (`aiohttp`, `websockets`, and `bbpb`, which it builds from PyPI), so no `/tmp/narwal-pydeps` step is needed; `git add flake.nix flake.lock` so `nix run .` can see them. It runs the working-tree `server.py`, so UI edits stay live (refresh the browser). `nix develop` drops into a shell with the same Python for the other `tools/*.py`. The server adds the bundled `narwal_client` from `/service` to `sys.path` at runtime (this host).
+
+Cut: drag a line across a room (the live overlay greys other rooms and colours the resulting pieces — green/blue for a valid 2-way split, orange for an extra piece that would be rejected as `SEG_MULTI_ROOM`); scroll to zoom, drag empty space to pan. Merge: pick two adjacent rooms. The server holds one WS connection (robot allows one per client IP; coexists with off-host HA) and logs every op to `/tmp/narwal-mapedit.log`. `tools/narwal_cut.py` is the equivalent single-shot CLI (dry-run by default; `--send`/`--save`).
 
 ## Regenerating the decompile (heavy artifacts, not committed)
 
@@ -83,7 +96,10 @@ nix-shell -p cmake ninja pkg-config icu capstone git \
 - `schema/StaticMapPayload.descriptor.txt` — `protoc --decode_raw` of the embedded descriptor (ground-truth map schema).
 - `schema/staticmap.desc` — the binary descriptor.
 - `schema/topics_all.txt` — every WebSocket topic string in the app (783).
-- `schema/error_codes.txt` — all `ERROR_CODE_*` (the robot's validation rules).
+- `schema/error_codes.txt` — raw `ERROR_CODE_*` strings dump (provenance).
+- `schema/error_codes.md` — authoritative numbered `ServiceResult` (result) + `ErrorCode` (error_code) enums for `MapOperation.Response`, decoded from the app.
 - `schema/MAP_DATA_FORMAT.md` — decoded `map_data` grid format, coordinate frames, and HACS-client field corrections.
 - `asm/{srv_map,msg_map}/` — Blutter disassembly of the map proto messages (evidence/provenance).
-- `tools/` — `parse_pb.py` (asm→schema), `show_msg.py`, `extract_desc.py`/`harvest_desc.py` (descriptor harvest), `extract_and_scan.py` (APK→.so→strings), `narwal_read.py` (live read), `narwal_crossing.py` (doorway crossing points), `decode_map.py` (grid decode/render).
+- `tools/` — `parse_pb.py` (asm→schema), `show_msg.py`, `extract_desc.py`/`harvest_desc.py` (descriptor harvest), `extract_and_scan.py` (APK→.so→strings), `narwal_read.py` (live read), `narwal_crossing.py` (doorway crossing points), `decode_map.py` (grid decode/render), `narwal_ops.py` (shared op encoders + grid decode), `narwal_cut.py` (cut CLI).
+- `tools/mapedit/` — local click-to-cut/merge web tool (`server.py` + `index.html`).
+- `flake.nix` — `nix run .` launches the map-edit tool (bundles the Python deps); `nix develop` for a dev shell.
