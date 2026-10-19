@@ -93,12 +93,23 @@ file-read primitive** on the local network, bounded by whatever the robot's
 application process can read. Procfs-style pseudo-files are not served —
 `/proc/cpuinfo`, `/proc/mtd`, `/proc/mounts` all come back empty, consistent with
 a size-based read that sees 0 for those entries. Real files under `/proc`
-(`device-tree/*`) do work. Binary content has not been confirmed readable: the
-response field is a protobuf `string`, so a non-UTF-8 payload may be rejected.
+(`device-tree/*`) do work.
+
+**Binary content reads intact, byte-exactly.** The response's content field is a
+protobuf `string`, which is documented as UTF-8, but the device neither validates
+nor re-encodes it: stripped multi-megabyte ELF images come through with their
+section-header tables ending exactly at EOF, which cannot hold if a byte had been
+inserted, dropped, or substituted. Use `pull`, not `cat`, for anything
+non-textual — `cat` decodes for display and is lossy. Three limits apply, all
+measured: the robot serves one WebSocket per client IP; the client's 1 MiB
+receive cap has to be raised (it is); and asking for a *directory* closes the
+connection instead of returning an error. The proof and the numbers are in
+`DEVICE_ACQUISITION.md`.
 
 This is the most consequential finding in the repo, and it reframes the firmware
-problem: obtaining the device's own firmware and application images may not
-require the cloud account, an unpacker, or an exploit at all — only this socket.
+problem: obtaining the device's own firmware and application images needs no
+cloud account, no unpacker, and no exploit — only this socket. The remaining
+difficulty is *naming* files, because there is no directory-listing primitive.
 
 ## Filesystem map, from `DeviceFilePath-no_data_partition.conf`
 

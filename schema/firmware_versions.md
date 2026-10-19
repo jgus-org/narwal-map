@@ -113,6 +113,37 @@ The OTA endpoints below are read out of the official app's AOT snapshot
   not returned as an absolute URL.
 - **Authentication is mandatory** (`err_code 130105` on a known-real route). An
   anonymous firmware fetch is not possible.
+
+### What those endpoints actually return, measured against the account
+
+Queried 2026-10-19 through `tools/narwal_cloud.py` with a signed-in account that
+has all three units bound. Sign-in correction, which an earlier revision of this
+file got backwards: **the password is posted as a plain field inside TLS.**
+`libapp.so` contains no RSA public key (no `MIGf…` literal in the binary or the
+APK) and `LoginWithEmailPasswdRequest` forwards `passwd()` untransformed; the
+RSA-wrapped body this tool previously sent is rejected with `err_code 500000`.
+
+| Call | Result |
+|---|---|
+| `GET /app-ota-server/v1/firmware/upgrade/check` | `{"code":0,"result":null}` |
+| same, with a `firmwareVersion` query parameter | still `result:null` |
+| `GET …/v1/firmware/current/version/describe` | release notes only, `extend_info: null` |
+| `GET …/v1/auto/upgrade/state` | `code 500 system internal error` |
+| `GET /open-platform-manage-ota/v1/iot-platform/ota/check` | 404 |
+
+So `check` is **server-authoritative**: it answers from the server's own record of
+each device's version and ignores a claimed version in the request, so it cannot
+be talked into handing back a package for a device it believes is current. All
+three units are current, so no package URL is obtainable this way today. The
+viable play is to watch `check` and capture `filePath` the moment an upgrade is
+offered for a bound device — not to keep guessing versions at it.
+
+The app's own OTA flow confirms the package format: the app downloads a ZIP
+containing a `.json` manifest and **`ITEPKG03.PKG`** (ITE SDK packaging), then
+transfers it to the robot over BLE (`BLE_OTA`). The *phone* is the transport, and
+no firmware CDN host is hard-coded anywhere in the app — every URL literal in the
+binary is a support, help, or telemetry host. A package URL can therefore only
+arrive in a response body.
 - Narwal publishes **no downloadable firmware**. The upgrade policy page states
   updates are app-triggered or automatic only, and "no downgrade methods will be
   provided".
@@ -125,8 +156,11 @@ The OTA endpoints below are read out of the official app's AOT snapshot
   string }` and its response `CheckFirmware_Response { 1 status enum, 2
   firmwareStatus }` — no URL field exists in either.
 
-No firmware payload has been obtained. No public dump, mirror, or unpacker
-exists, and no Narwal rooting method is published.
+No OTA *package* has been obtained. No public dump, mirror, or unpacker exists,
+and no Narwal rooting method is published. That no longer blocks the firmware
+work: the device's own binaries are readable over the LAN socket byte-exactly,
+which is a better source than a package we would have to unpack anyway. See
+`DEVICE_ACQUISITION.md`.
 
 ## Upgrading over the LAN
 

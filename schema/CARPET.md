@@ -54,16 +54,30 @@ than a blocking fault.
 **Our own confirming observation is limited to**: the fault appears on clear
 carpet with visibly clear wheels, on both carpet units, while mapping.
 
-## Which subsystem owns it — not established
+## Which subsystem owns it — narrowed by the firmware's own error registry
 
 The threshold plausibly sits in the motor/sensor MCU and the escalation in the
 Linux-side app. That began as an inference from the two-CPU architecture pattern
-in the vendor's earlier product, but it now has supporting evidence: the
-device's own served configuration tree (`DEVICE_CONFIG.md`) carries planning and
-perception behaviour parameters and **no** per-wheel current or stall threshold,
-and the drive MCU image (`robot.mcu` / `0210_DR_GD0C`) is not part of that tree.
-Still not a measurement of where the decision is made — but the Linux side can
-now be largely excluded on evidence rather than guesswork.
+in the vendor's earlier product, and two measurements now bear on it.
+
+First, the device's own served configuration tree (`DEVICE_CONFIG.md`) carries
+planning and perception behaviour parameters and **no** per-wheel current or
+stall threshold, and the drive MCU image (`robot.mcu` / `0210_DR_GD0C`) is not
+part of that tree.
+
+Second, the error registry carved out of the device's
+`/oem/DISK/bin/pita/lib/libprotocol_protobuf.so` (`DEVICE_ERROR_CODES.md`)
+separates the two conditions by code block:
+`kErrRobotFirstStuckOnCarpet` / `kErrRobot{Left,Right}WheelStuckOnCarpet` are in
+the **application** block `0x0211`, while `k{Both,Left,Right}WheelStuck` and
+`k…WheelOverCurrentRequiresRestart` are in block `0x0231`. So "stuck on carpet"
+is **not** a wheel over-current trip reported early — it is its own classifier,
+and it runs in the Linux-side application layer, above the driver. The
+quantities it watches still come from `kRobotDriverNode`, so the MCU remains the
+source of the inputs; the *decision* is not in the MCU.
+
+That also means the decision-maker is code we can pull and disassemble over the
+LAN socket, and the event has numeric codes we can watch for live.
 
 ## Settings surface (recorded for completeness — not the plan)
 
@@ -71,8 +85,8 @@ The fault is a drive-side stall trip deep inside closed firmware. Owner-visible
 settings have already been exercised on these units without resolving it, so
 **nothing below is expected to fix the fault**; it is catalogued only so the
 investigation doesn't re-derive it, and because some of it is useful *instrumentation*
-for the firmware work. The real path is getting and disassembling firmware — see
-`schema/firmware_versions.md`.
+for the firmware work. The real path is disassembling the application-layer
+classifier that reports this fault — see `schema/DEVICE_ACQUISITION.md`.
 
 Ranked by how cheap it is to try.
 
@@ -120,23 +134,29 @@ plaintext.
 
 Where it stops: those are *planning and perception* configs. No per-wheel current
 or stall threshold appears anywhere in the served set, and the drive MCU image is
-not part of it. This narrows the fault toward the MCU without reading it. Editing
-these files is a device mutation, not a settings change.
+not part of it. Editing these files is a device mutation, not a settings change.
 
 ## What is *not* in either repo (searched, negative)
 
 Wheel speed / RPM / current / encoder, motor torque or current limits, wheel
 slip, stall, jam, bumper state, cliff sensor state, chassis-raise or
-wheel-height, stuck-recovery manoeuvres, obstacle-avoidance sensitivity, and any
-runtime fault-code→text table. `octopus.core.ExceptionInfo` (map field 48) is
-referenced and never dumped. There is no local fault-code table at all — the app
-resolves codes by opening a web page, so numeric codes cannot be resolved
-offline.
+wheel-height, stuck-recovery manoeuvres, obstacle-avoidance sensitivity.
+`octopus.core.ExceptionInfo` (map field 48) is referenced and never dumped.
 
-## The honest state of a firmware fix
+The earlier note here that "numeric codes cannot be resolved offline" is
+**corrected**: the device's own fault registry — `protocol/error_code/protobuf/ErrorCode.proto` — was carved out of `libprotocol_protobuf.so` and is in `DEVICE_ERROR_CODES.md`, names and numbers intact.
 
-Firmware is **signed and encrypted**, the OTA service requires authentication,
-Narwal publishes no firmware files and states no downgrade path, no Narwal
-rooting method is published, and no unpacker exists. A patched-firmware route
-first requires obtaining a legitimate payload, then defeating signature
-enforcement. That is a materially harder problem than the settings surface above.
+## The state of a firmware fix
+
+The old framing here — obtain a signed OTA payload, then defeat its signature —
+is no longer the route, because acquisition stopped being the obstacle. The
+device serves any file its application process can read, binaries intact, over
+the unauthenticated LAN socket (`DEVICE_ACQUISITION.md`), so the code that makes
+the carpet-stuck decision is in hand rather than behind an OTA service that
+returns nothing while a unit is current (`firmware_versions.md`).
+
+What remains is analysis, not acquisition: the application-layer classifier is
+named in the error registry but its thresholds are not in any config read so far,
+and the drive-side module library is still unlocated by name (no directory-listing
+primitive; see `DEVICE_ACQUISITION.md`). Patching a running unit would additionally
+require write access we do not have — reading is not root.
