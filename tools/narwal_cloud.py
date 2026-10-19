@@ -3,9 +3,13 @@
 
 The LAN protocol never returns a firmware download URL, so obtaining a firmware
 image means going through the account API. This client reproduces the official
-app's sign-in (the password is RSA-wrapped with the app's own public key before
-the already-TLS request, so nothing here weakens transport security) and then
-exposes the device list and the OTA service.
+app's sign-in, then exposes the device list and the OTA service.
+
+The password is sent as a plain field inside TLS, exactly as the app does:
+`libapp.so` contains no RSA public key (no `MIGf...` literal in the binary or
+the APK) and `LoginWithEmailPasswdRequest` forwards `passwd()` untransformed,
+so there is no application-layer wrapping to reproduce. An RSA-wrapped password
+is rejected with `err_code 500000`.
 
 Credentials are never taken from the command line or printed. Put the account
 password on a tmpfs path (`/dev/shm/narwal-cloud/password`, mode 0600) or set
@@ -35,8 +39,6 @@ import sys
 from pathlib import Path
 
 import aiohttp
-from cryptography.hazmat.primitives.asymmetric import padding, rsa
-from cryptography.hazmat.primitives.serialization import load_der_public_key
 
 API_HOSTS = {
     "us": "https://us-app.narwaltech.com",
@@ -65,27 +67,16 @@ OTA_AUTO_STATE_PATH = f"{OTA_PREFIX}/v1/auto/upgrade/state"
 # returns a generic 500000 rather than anything actionable.
 REGION_COUNTRY = {"us": "US", "eu": "DE", "kr": "KR", "cn": "CN"}
 
-# Public key shipped inside the official Narwal app; it wraps the password
-# before TLS, not instead of it. Not a secret, and not account-specific.
-LOGIN_PUBLIC_KEY_DER = base64.b64decode(
-    "MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQD4DMOh3L+BfGpLM4lm1ihHka9y"
-    "GtX0AYvabNoi+hOjCQsoFe0hesU05MV2tgqrxfShwOwHEuXd0YLrGPqpe0LYsDD2J"
-    "exiQAuNyKIah4kKINVmJkyf0aYPuCueRHIWkWRpsHSozkMDwjFcabMFEaMba7L9J"
-    "kmMni8a7hqgcuvyIQIDAQAB"
-)
+# The keys LoginWithEmailPasswdRequest builds. captcha_code is empty until the
+# service challenges, and over_fourteen_years is a compliance flag the service
+# requires on this endpoint.
+LOGIN_TERMINAL_SYSTEM_NAME = "Android"
 
 DEFAULT_PASSWORD_FILE = Path("/dev/shm/narwal-cloud/password")
 DEFAULT_TOKEN_CACHE = Path("/dev/shm/narwal-cloud/tokens.json")
 AUTH_ERROR_CODES = {130105, 130106}
 AUTH_HTTP_STATUSES = (401, 403)
 REDACTED = "***"
-
-
-def encrypt_password(password: str) -> str:
-    key = load_der_public_key(LOGIN_PUBLIC_KEY_DER)
-    if not isinstance(key, rsa.RSAPublicKey):
-        raise ValueError("Narwal login key is not an RSA public key")
-    return base64.b64encode(key.encrypt(password.encode(), padding.PKCS1v15())).decode()
 
 
 def token_claims(token: str) -> dict:
@@ -98,6 +89,7 @@ def token_claims(token: str) -> dict:
 
 
 def find_token_pair(payload: object) -> tuple[str, str] | None:
+    """Access token, and the refresh token when the service returns one."""
     if not isinstance(payload, dict):
         return None
     result = payload.get("result")
@@ -106,9 +98,10 @@ def find_token_pair(payload: object) -> tuple[str, str] | None:
         candidates += [v for v in result.values() if isinstance(v, dict)]
     for cand in candidates:
         access = cand.get("token") or cand.get("accessToken")
+        if not isinstance(access, str):
+            continue
         refresh = cand.get("refreshToken") or cand.get("refresh_token")
-        if isinstance(access, str) and isinstance(refresh, str):
-            return access, refresh
+        return access, refresh if isinstance(refresh, str) else ""
     return None
 
 
@@ -188,11 +181,15 @@ class NarwalCloud:
             return resp.status, parsed
 
     async def login(self, email: str, password: str) -> None:
-        wrapped = encrypt_password(password)
         self.uuid = secrets.token_hex(16)
         status, body = await self.request(
-            "POST", LOGIN_PATH, {"email": email, "encrypted_password": wrapped,
-                                 "password": wrapped})
+            "POST", LOGIN_PATH,
+            {"email": email,
+             "password": password,
+             "terminal_system_name": LOGIN_TERMINAL_SYSTEM_NAME,
+             "app_version": CLIENT_APP_VERSION,
+             "captcha_code": "",
+             "over_fourteen_years": True})
         pair = find_token_pair(body)
         if pair is None:
             raise RuntimeError(f"login failed: HTTP {status} body={_redact(body)}")
@@ -204,6 +201,8 @@ class NarwalCloud:
 
     async def refresh(self) -> bool:
         assert self.session is not None
+        if not self.refresh_token:
+            return False
         url = f"{self.host}{REFRESH_PATH}"
         async with self.session.post(
                 url, json={"refreshToken": self.refresh_token},
@@ -269,14 +268,13 @@ async def main() -> int:
     async with aiohttp.ClientSession() as session:
         cloud.session = session
         cached = not args.force_login and cloud.load_cache()
+        if cached and cloud.refresh_token and not await cloud.refresh():
+            print("cached token could not be refreshed, signing in again")
+            cached = False
         if not cached:
             email = os.environ.get("NARWAL_EMAIL")
             if not email:
                 raise SystemExit("no account: set NARWAL_EMAIL")
-            await cloud.login(email, read_password(args.password_file))
-        elif not await cloud.refresh():
-            print("cached token could not be refreshed, signing in again")
-            email = os.environ.get("NARWAL_EMAIL", "")
             await cloud.login(email, read_password(args.password_file))
 
         if args.command == "devices":
