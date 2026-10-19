@@ -17,7 +17,7 @@ Usage:
     python tools/narwal_cloud.py devices
     python tools/narwal_cloud.py ota-probe
     python tools/narwal_cloud.py ota
-    python tools/narwal_cloud.py ota --body '{"deviceId":"...","productKey":"..."}'
+    python tools/narwal_cloud.py ota --query '{"productId":"iSuVlI1If2","deviceId":"..."}'
     python tools/narwal_cloud.py --region eu devices
 """
 
@@ -166,10 +166,10 @@ class NarwalCloud:
         self.cache.chmod(stat.S_IRUSR | stat.S_IWUSR)
 
     async def request(self, method: str, path: str, body: dict | None = None,
-                      retried: bool = False):
+                      retried: bool = False, params: dict | None = None):
         assert self.session is not None
         url = f"{self.host}{path}"
-        async with self.session.request(method, url, json=body,
+        async with self.session.request(method, url, json=body, params=params,
                                         headers=self.headers(),
                                         timeout=aiohttp.ClientTimeout(total=30)) as resp:
             text = await resp.text()
@@ -257,8 +257,9 @@ async def main() -> int:
     ap.add_argument("--region", default="us", choices=sorted(API_HOSTS))
     ap.add_argument("--path", default=OTA_CHECK_PATH,
                     help=f"OTA path for the ota command (default {OTA_CHECK_PATH})")
-    ap.add_argument("--body", default="{}",
-                    help='JSON request body for the ota command')
+    ap.add_argument("--query",
+                    help='JSON object of query parameters, e.g. '
+                         '\'{"productId":"iSuVlI1If2","deviceId":"..."}\'')
     ap.add_argument("--password-file", type=Path)
     ap.add_argument("--cache", type=Path, default=DEFAULT_TOKEN_CACHE)
     ap.add_argument("--force-login", action="store_true")
@@ -281,17 +282,19 @@ async def main() -> int:
         if args.command == "devices":
             await cloud.devices()
         elif args.command == "ota":
+            # The app issues these as GETs whose parameters are query string, not
+            # a JSON body; a POSTed body is not what the service reads.
             try:
-                body = json.loads(args.body)
+                query = json.loads(args.query) if args.query else {}
             except json.JSONDecodeError as exc:
-                raise SystemExit(f"--body is not valid JSON: {exc}") from exc
-            status, resp = await cloud.request("POST", args.path, body)
-            print(f"POST {args.path} -> HTTP {status}")
+                raise SystemExit(f"--query is not valid JSON: {exc}") from exc
+            status, resp = await cloud.request("GET", args.path, None, params=query)
+            print(f"GET {args.path}{f'?{query}' if query else ''} -> HTTP {status}")
             print(json.dumps(_redact(resp), indent=2, ensure_ascii=False, default=str))
         else:
             print(f"probing {OTA_PREFIX} routes with an authenticated token")
             for path in OTA_ENDPOINTS:
-                status, resp = await cloud.request("POST", path, {})
+                status, resp = await cloud.request("GET", path, None)
                 snippet = json.dumps(resp, default=str)[:120]
                 print(f"  {status}  {path}  {snippet}")
     return 0
