@@ -155,16 +155,45 @@ not console access, is the expected barrier.
 
 ## Generic config surface (read confirmed, write untested)
 
-`config/get` with an empty payload returns a populated ~40-field numbered
-message (245 bytes on Louie), and `config/set` exists with a `/response` sibling.
-Observed field numbers: 1 (=70), 3 (timezone/region: `Asia/Shanghai` / `中国` /
-`东菼), 4, 6, 8, 11, 12, 13, 14, 15, 17, 18, 19, 23, 26–28, 29, 31–34, 36–38,
-41–44, 45 (a date string), 46, 47, 48 (wake word "Hey, Nawa"), 49, 50, 51.
+`config/get` with an empty payload returns a populated message and `config/set`
+exists with a `/response` sibling. **The message is now named** — it is
+`GetConfig_Response_Config` in the app's own proto tree (`srv/config/`), and its
+56 fields are:
 
-**No field name is known for any of them** — recovering the names needs the app
-decompile. This is the cheapest write path to a behaviour change if a
-carpet/drive-related threshold turns out to live here, and it is preferable to
-firmware patching if it does. Writing to it has not been attempted.
+```
+1 volumePercentage          2 language            3 region
+4 disturbMode               5 highAltitudeModeEnabled  6 autoAddDetergentEnabled
+7 childLockEnabled          8 cleanCarpetEnabled  9 cleanCornerSetting
+10 boostCrossingModeEnabled 11 smartCleanDetectionEnabled 12 dryMopStrength
+13 cleanMopFreq             14 cleanCorner        15 carpetCleanOption
+16 carpetCleanCustomEnabled 17 addCarpetCleanOption 18 customCleanStrategy
+19 smartCleanSetting        20 switchBackToMainMapAfterTempMapClean
+21 stationCleanMode         22 petMode            23 smartDeepCleanEnabled
+24 showVisionImageEnabled   25 privacyPolicyEnabled 26 moistureProofPadProtectEnabled
+27 dustGatheringEnabled     28 smartDustGatheringEnabled 29 smartCleanParam
+30 quietDustGatheringEnabled 31 dryRobotBagEnabled  32 hotWaterWashEnabled
+33 massiveDirtyDeepCleanEnable 34 avoidMode        35 robotCleanMode
+36 speechControlEnabled     37 automaticPoweroffWhenDischarging 38 valleyCharging
+39 aiVoiceSoundEffectEnabled 40 aiVoiceSoundEffectForWaitingEnabled
+41 cornerCleanMode          42 petIconType        43 enableDustSensorDirtyDetect
+44 mapConfiguration         45 buildDateTime      46 carpetCleanPriorityOption
+47 carpetDeepCleanOption    48 wakeVoiceWords[]   49 allThingsRecognitionEnabled
+50 preciousItemGuardEnabled 51 stationLightCtrlType 52 carpetOptionAdapatStrategy
+53 carpetCleanSidebrushOption 54 addCarpetDeepCleanOption
+55 humanPetBlockRepenishCleanEnabled 56 trackForwardAssistEnabled
+```
+
+An earlier revision of this file stated that no field name was known; that was
+written before the app was decompiled.
+
+Nine fields are carpet-named (`8`, `15`, `16`, `17`, `46`, `47`, `52`, `53`,
+`54`) and two read as drive-side rather than cleaning-side:
+`10 boostCrossingModeEnabled` and `56 trackForwardAssistEnabled`. Note the
+honest limit: every carpet field here is about *cleaning behaviour* (option,
+priority, deep-clean, side-brush), and none is a current, torque, or resistance
+threshold. `SetConfig_Request` is the same field set and is writable, so these
+are the responsible write targets if a behaviour change is wanted — but nothing
+in this schema exposes the stall threshold the fault is about.
 
 Also confirmed on the developer surface, on a live unit:
 

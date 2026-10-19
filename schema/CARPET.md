@@ -57,9 +57,13 @@ carpet with visibly clear wheels, on both carpet units, while mapping.
 ## Which subsystem owns it — not established
 
 The threshold plausibly sits in the motor/sensor MCU and the escalation in the
-Linux-side app, but that is an inference from the two-CPU architecture pattern in
-the vendor's earlier product, not a measurement. Nothing in either repo proves
-which processor decides.
+Linux-side app. That began as an inference from the two-CPU architecture pattern
+in the vendor's earlier product, but it now has supporting evidence: the
+device's own served configuration tree (`DEVICE_CONFIG.md`) carries planning and
+perception behaviour parameters and **no** per-wheel current or stall threshold,
+and the drive MCU image (`robot.mcu` / `0210_DR_GD0C`) is not part of that tree.
+Still not a measurement of where the decision is made — but the Linux side can
+now be largely excluded on evidence rather than guesswork.
 
 ## Settings surface (recorded for completeness — not the plan)
 
@@ -104,6 +108,20 @@ Ranked by how cheap it is to try.
    `StaticMapPayload` field 47 `robot_trapped_points` records *where* it got
    trapped and field 48 is `exception_info_list`; **both are absent on all three
    units at rest**, so they must be read immediately after a real stuck episode.
+
+## The device's own config tree is readable — see `DEVICE_CONFIG.md`
+
+`tools/narwal_dynconf.py` enumerates and reads the 1259 configuration files the
+device serves over the unauthenticated LAN socket. This displaces the earlier
+position that firmware extraction was the only route to understanding the
+device: `PassCarpet.conf`, `CarpetExplore.conf`, `CarpetConfig.conf`,
+`CrossingCommon.conf` and the `slip_ctrl` assist modules are all readable
+plaintext.
+
+Where it stops: those are *planning and perception* configs. No per-wheel current
+or stall threshold appears anywhere in the served set, and the drive MCU image is
+not part of it. This narrows the fault toward the MCU without reading it. Editing
+these files is a device mutation, not a settings change.
 
 ## What is *not* in either repo (searched, negative)
 
