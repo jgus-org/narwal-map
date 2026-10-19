@@ -77,6 +77,52 @@ Other named configs present and worth reading:
 `AssistCleanModule-*slip_ctrl*.conf` family, and the `Crossing-*.conf` variants
 keyed on whether the motion module can lift.
 
+## It is not limited to the served set — it is an arbitrary file read
+
+The list above is what the app's developer screen shows. The read topic is not
+restricted to it. Confirmed by reading paths that appear in no listing:
+
+```
+/etc/os-release                  -> Buildroot 2022.08, X34_v00.01.02.42-3-gf36b6f4972
+/proc/device-tree/compatible     -> "Horizon, x5"
+/oem/DISK/bin/pita/robokit_platform/conf/auth_config.conf
+```
+
+So `dynamic_params/config_content/get` is an **unauthenticated arbitrary
+file-read primitive** on the local network, bounded by whatever the robot's
+application process can read. Procfs-style pseudo-files are not served —
+`/proc/cpuinfo`, `/proc/mtd`, `/proc/mounts` all come back empty, consistent with
+a size-based read that sees 0 for those entries. Real files under `/proc`
+(`device-tree/*`) do work. Binary content has not been confirmed readable: the
+response field is a protobuf `string`, so a non-UTF-8 payload may be rejected.
+
+This is the most consequential finding in the repo, and it reframes the firmware
+problem: obtaining the device's own firmware and application images may not
+require the cloud account, an unpacker, or an exploit at all — only this socket.
+
+## Filesystem map, from `DeviceFilePath-no_data_partition.conf`
+
+The device's own path table (translated comments):
+
+| Key | Path |
+|---|---|
+| device info | `/robotdata/static/robot_info/robot_device_info.ini` |
+| auth config | `/oem/DISK/bin/pita/robokit_platform/conf/auth_config.conf` |
+| auth private key | `/robotdata/static/robot_info/private_key.pem` |
+| user info | `/userdata/usr/data/robot_info/user_app_config.json` |
+| firmware info | `/oem/DISK/bin/pita/version/pita_version.yaml` |
+| domain config | `/robotdata/static/robot_info/domain.ini` |
+| low-power control | `/robotdata/dynamic/device_low_power_enable_cfg.conf` |
+
+`auth_config.conf` shows the device authenticates to the cloud itself: a JWT
+request to `/sweeper-auth-server/v1/login`, POST, `password_encrypt_type: 2`
+(RSA). So device-side cloud auth uses a keypair, separate from the user's account
+token.
+
+The served `conf/robot_device.ini` is a template (`deviceId = 0`,
+`productId = inoK79aEsD`); the live product key these units answer with is
+`iSuVlI1If2`, and the live identity lives under `/robotdata/`.
+
 ## What this does and does not establish
 
 It does **not** contain a drive-motor current or stall threshold. Searching the
@@ -86,6 +132,6 @@ over-current limit. That is consistent with the trip living in the drive MCU
 (`robot.mcu`, `0210_DR_GD0C`), which does **not** appear in this file set — this
 tree is the Linux-side application's configuration only.
 
-So the fault's threshold is not a file we can read or edit over the LAN, and
-these files are editable-but-device-owned: changing them is a device mutation,
-not a settings change.
+So the fault's threshold is not a file we have read yet, and these config files
+are editable-but-device-owned: changing them is a device mutation, not a settings
+change.

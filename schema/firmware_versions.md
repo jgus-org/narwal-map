@@ -139,19 +139,44 @@ That closes off "download it some other way, then tell the robot to install it
 from a local path" unless the robot can be made to resolve a host we control.
 
 
-## Chipset: inference, not measurement
+## Chipset: corrected by reading the device
 
-No Flow 2 teardown exists publicly. The Narwal **Freo** (YJCC012) has been
-published as **Allwinner MR813** (quad Cortex-A53, aarch64), 1 GB RAM, 4 GB
-eMMC, **GD32F303** Cortex-M4 MCU, Tina/OpenWRT **Linux 4.9**, firmware "signed,
-encrypted" — robotinfo.dev (`detail_narwal.freo_0.html`). MR813 + Tina 4.9 is
-also the Roborock S8 and Dreame X40 platform, so that toolchain transfers.
+Earlier revisions of this file recorded the Flow 2 SoC as an **inference** from
+the vendor's earlier product — Narwal Freo (YJCC012) is published as Allwinner
+MR813, Tina/OpenWRT Linux 4.9, GD32F303 MCU (robotinfo.dev
+`detail_narwal.freo_0.html`), the same platform as the Roborock S8 and Dreame
+X40.
 
-Whether Flow 2 uses the same SoC is **unestablished**. The app's proto calls
-`0200_OA_813A` the `cpu` firmware component, so the `813A` token does sit on the
-main-application-processor image rather than some incidental part — but a
-component name is not a teardown, and no Flow 2 teardown exists. Secure boot,
-not console access, is the expected barrier.
+That inference is **wrong for the Flow 2**, measured directly off Louie through
+the file-read primitive described in `DEVICE_CONFIG.md`:
+
+```
+/proc/device-tree/compatible : "Horizon, x5"
+/etc/os-release              : NAME=Buildroot
+                               VERSION=X34_v00.01.02.42-3-gf36b6f4972
+                               ID=buildroot  VERSION_ID=2022.08
+                               PRETTY_NAME="Buildroot 2022.08"
+```
+
+The application processor is a **Horizon Robotics X5** (the RDK X5 family:
+Cortex-A55 cores plus a BPU NPU, which is what a vision-guided vacuum wants),
+and the userspace is plain **Buildroot 2022.08** — not Tina, not OpenWRT, and not
+necessarily Linux 4.9. The `X34_v00.01.02.42-3-gf36b6f4972` string is an SDK
+version carrying a git-describe suffix.
+
+Consequences for the firmware work:
+
+- Toolchains, exploit write-ups and unpackers from the MR813/Tina lineage do
+  **not** transfer. The relevant ecosystem is Horizon RDK X5 + Buildroot.
+- The `813A` in `robot.cpu`'s part id `0200_OA_813A` is **not** Allwinner 813.
+  With the SoC now measured, that reading is refuted; it is vendor shorthand for
+  a Horizon-based board.
+- Whether the `robot.mcu` co-processor is still a GD32F303 is untested. The part
+  id `0210_DR_GD0C` suggests GD32 and nothing here confirms it.
+
+`/proc/cpuinfo`, `/proc/mtd` and `/proc/mounts` all return empty: procfs entries
+report size 0 and this read path does not serve them. Use `/proc/device-tree/*`,
+which are real files, for hardware identity.
 
 ## Generic config surface (read confirmed, write untested)
 

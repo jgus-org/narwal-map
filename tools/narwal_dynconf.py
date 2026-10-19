@@ -24,9 +24,13 @@ Usage:
     python tools/narwal_dynconf.py cat louie /oem/DISK/bin/pita/planning/conf/navi/PassCarpet.conf
     python tools/narwal_dynconf.py list louie --dump /tmp/dynconf
 
-The device enumerates its own served set and only answers its own
-`absolutePath` values; a request built from the bare name or the `oemPath`
-returns an empty message.
+The list command shows what the app's developer screen offers, but the read
+topic is not limited to it: arbitrary readable paths are served, so treat this
+as a file-read primitive. Procfs pseudo-files (size 0) come back empty.
+Requests must carry absolutePath; name or oemPath alone return an empty message.
+
+Paths matching key material are refused, because the served set includes the
+device's own `private_key.pem`.
 """
 
 from __future__ import annotations
