@@ -1,10 +1,13 @@
 # narwal-map
 
-Reverse-engineering the **Narwal Flow 2** robot vacuum's local map-edit protocol, to script room splits/merges the official Narwal Freo app can't do — specifically **atomic multi-doorway cuts** for "donut"/annulus floor topologies.
+Reverse-engineering the **Narwal Flow 2** robot vacuum over its local protocol. Two lines of work live here: scripting **map edits** the official app won't do (atomic multi-doorway cuts for "donut"/annulus floor topologies), and investigating the **stuck-on-carpet** fault, including what the firmware would and would not let us patch.
 
-## The problem
+The repo is effectively `narwal-tools` — protocol RE plus the CLIs that drive it.
 
-A space that's two rooms joined by **two** doorways is topologically a ring ("O"). Cutting one doorway leaves it connected through the other (a "C" — still one region), so the robot rejects a single cut as a no-op. You must cut **both doorways atomically**, which the app's UI refuses to let you draw. The app is the limitation; the robot's protocol is not.
+## The problems
+
+1. **Donut cuts.** A space that's two rooms joined by **two** doorways is topologically a ring ("O"). Cutting one doorway leaves it connected through the other (a "C" — still one region), so the robot rejects a single cut as a no-op. You must cut **both doorways atomically**, which the app's UI refuses to let you draw. The app is the limitation; the robot's protocol is not.
+2. **Stuck on carpet.** Two of three units stop dead mid-mapping on clear carpet — no obstruction, wheels visibly clear, just pile resistance — and demand a button press. The third unit, on hard floor only, never does. See `schema/CARPET.md` for the mechanism, the writable surface, and `schema/firmware_versions.md` for the firmware/OTA picture.
 
 ## Key findings
 
@@ -95,11 +98,13 @@ nix-shell -p cmake ninja pkg-config icu capstone git \
 - `schema/SCHEMA.txt` — raw field-list dump of all 76 messages (from `tools/parse_pb.py`).
 - `schema/StaticMapPayload.descriptor.txt` — `protoc --decode_raw` of the embedded descriptor (ground-truth map schema).
 - `schema/staticmap.desc` — the binary descriptor.
-- `schema/topics_all.txt` — every WebSocket topic string in the app (783).
+- `schema/topics_all.txt` — every path-shaped string in the app (783). **Not all are protocol topics:** the file mixes real LAN topics (multi-segment, usually with a `/response` sibling) with ~250 Flutter page routes (single `snake_case` token, e.g. `/carpet_set_page_v3`, `/floor_material`, `/oem_carpet_set`), cloud REST paths, and filesystem paths. Treat any single-token `snake_case` entry as UI, not something to send the robot.
 - `schema/error_codes.txt` — raw `ERROR_CODE_*` strings dump (provenance).
 - `schema/error_codes.md` — authoritative numbered `ServiceResult` (result) + `ErrorCode` (error_code) enums for `MapOperation.Response`, decoded from the app.
 - `schema/MAP_DATA_FORMAT.md` — decoded `map_data` grid format, coordinate frames, and HACS-client field corrections.
+- `schema/firmware_versions.md` — model identity, the per-component firmware table read live off all three units, the OTA service surface, and the (signed/encrypted) firmware-obstacle picture.
+- `schema/CARPET.md` — the stuck-on-carpet investigation: mechanism, the writable carpet/config surface, negative results, and what still has to be captured during a real fault.
 - `asm/{srv_map,msg_map}/` — Blutter disassembly of the map proto messages (evidence/provenance).
-- `tools/` — `parse_pb.py` (asm→schema), `show_msg.py`, `extract_desc.py`/`harvest_desc.py` (descriptor harvest), `extract_and_scan.py` (APK→.so→strings), `narwal_read.py` (live read), `narwal_crossing.py` (doorway crossing points), `decode_map.py` (grid decode/render), `narwal_ops.py` (shared op encoders + grid decode), `narwal_cut.py` (cut CLI).
+- `tools/` — `parse_pb.py` (asm→schema), `show_msg.py`, `extract_desc.py`/`harvest_desc.py` (descriptor harvest), `extract_and_scan.py` (APK→.so→strings), `narwal_read.py` (live read), `narwal_crossing.py` (doorway crossing points), `decode_map.py` (grid decode/render), `narwal_ops.py` (shared op encoders + grid decode), `narwal_cut.py` (cut CLI), `narwal_carpet.py` (per-unit carpet objects + `cleanOption`), `narwal_firmware.py` (per-component firmware inventory).
 - `tools/mapedit/` — local click-to-cut/merge web tool (`server.py` + `index.html`).
 - `flake.nix` — `nix run .` launches the map-edit tool (bundles the Python deps); `nix develop` for a dev shell.
