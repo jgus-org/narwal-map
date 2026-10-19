@@ -18,17 +18,16 @@ Read with `tools/narwal_carpet.py`, 2026-10-19. Two things to notice:
   the *same* firmware as Louie and does not exhibit the fault; Huey runs an
   *older* firmware and does. The behaviour therefore spans both versions we
   have, so there is no good version to move to.
-- **The unit with no carpet problem has the most carpet objects** (11 vs 9 and 4).
-  The `Carpet` records are the robot's own auto-classification, not user input.
-  Either the classifier is marking non-carpet flooring as carpet on the unit that
-  never faults, or Dewey does cross small rugs its owner doesn't count as carpet.
-  Worth resolving from the app's carpet overlay: if Dewey's 11 "carpets" are
-  phantom, the classifier is unreliable, and the two faulting units may be
-  faulting on carpets that are likewise misclassified.
+- **Carpet objects are the robot's own auto-classification, not user input.**
+  Dewey carries 11 despite the owner describing it as the hard-floor unit — the
+  floor does have an area rug and several small mats, so those detections are
+  plausible rather than phantom. Counting `Carpet` records across units is
+  therefore not a usable proxy for "how much carpet does this robot see".
 
-`cleanOption` is not stable. Louie read uniformly `1` at 13:20 and uniformly `2`
-at 14:30 the same day, with no edit made by us. Treat a single reading of it as
-a snapshot, not a device property.
+`cleanOption` is user-editable and moves when the app's per-carpet policy is
+changed; a reading of it is a snapshot of the current setting, not a device
+property. (An earlier revision of this file read Louie's `1` → `2` drift as
+spontaneous; it was an owner edit made while experimenting.)
 
 ## What the fault actually is
 
@@ -62,7 +61,14 @@ Linux-side app, but that is an inference from the two-CPU architecture pattern i
 the vendor's earlier product, not a measurement. Nothing in either repo proves
 which processor decides.
 
-## The controllable surface
+## Settings surface (recorded for completeness — not the plan)
+
+The fault is a drive-side stall trip deep inside closed firmware. Owner-visible
+settings have already been exercised on these units without resolving it, so
+**nothing below is expected to fix the fault**; it is catalogued only so the
+investigation doesn't re-derive it, and because some of it is useful *instrumentation*
+for the firmware work. The real path is getting and disassembling firmware — see
+`schema/firmware_versions.md`.
 
 Ranked by how cheap it is to try.
 
