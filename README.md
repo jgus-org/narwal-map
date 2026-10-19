@@ -75,22 +75,49 @@ Cut: drag a line across a room (the live overlay greys other rooms and colours t
 
 ## Regenerating the decompile (heavy artifacts, not committed)
 
-The 254 MB XAPK, `libapp.so`/`libflutter.so` (regenerable), and full Blutter output are excluded. To rebuild:
+The 138 MB `.apks` bundle, `libapp.so`/`libflutter.so` (regenerable), and full Blutter output are excluded. To rebuild:
 
 ```bash
-# Download the app (Flutter; package com.narwal.pita_global)
-nix-shell -p apkeep --run "apkeep -a com.narwal.pita_global -d apk-pure /tmp/narwal-apk"
-#   then unzip the .xapk, pull config.arm64_v8a.apk's lib/arm64-v8a/{libapp.so,libflutter.so}
-#   (tools/extract_and_scan.py does this + greps strings for topics)
+# Download the app (Flutter; package com.narwal.pita_global).
+# APKMirror serves the Google Play split bundle; its download needs two
+# per-session tokens harvested in sequence (page -> /download/?key= -> download.php).
+UA='Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36'
+curl -sSL -A "$UA" -c /tmp/am.jar -o /tmp/am_dl.html \
+  https://www.apkmirror.com/apk/narwal-intelligence-technology/narwal/narwal-2-9-90-release/narwal-2-9-90-android-apk-download/
+# grep the '/download/?key=' href out of that page, follow it, grep the
+# 'download.php?id=...&key=...' href from that, then:
+curl -sSL -A "$UA" -b /tmp/am.jar -o /tmp/narwal.apks '<download.php URL>'
 
-# Decompile (Dart 3.9.2). Blutter needs a one-line CMake fix on nixpkgs:
-#   blutter/CMakeLists.txt: include_directories(AFTER ${CAPSTONE_INCLUDEDIR} ${CAPSTONE_INCLUDEDIR}/capstone)
-git clone --depth 1 https://github.com/worawit/blutter /tmp/blutter
-nix-shell -p cmake ninja pkg-config icu capstone git \
-  "python3.withPackages(ps: with ps; [pyelftools requests])" \
-  --run "python3 /tmp/blutter/blutter.py /tmp/narwal-apk/lib /tmp/blutter-out"
-# protobuf message schemas: asm/app_protol/proto/mqtt/{srv,msg}/map/*.pb.dart
+# There is no gzip in this environment, so use bsdtar, not GNU tar.
+mkdir -p /tmp/narwal-apk
+bsdtar -xf /tmp/narwal.apks -C /tmp/narwal-apk split_config.arm64_v8a.apk
+bsdtar -xf /tmp/narwal-apk/split_config.arm64_v8a.apk -C /tmp/narwal-apk \
+  lib/arm64-v8a/libapp.so lib/arm64-v8a/libflutter.so
 ```
+
+`apkeep -d apk-pure` does **not** work here: its source-risk warning is TTY-gated
+(`--acknowledge-source-risk` is not a real flag, and piping `y` on stdin does not
+satisfy it), and apkpure's own download endpoint returns 403 to curl.
+
+Verified identity of the build used: `com.narwal.pita_global` versionName
+**2.9.90**, versionCode **184**, arm64-v8a only, minSdk 24. The engine reports
+**Dart 3.9.2 (stable)** — read out of `libflutter.so`, so that version is measured
+against this binary rather than inherited from the earlier decompile.
+
+```bash
+# Decompile. Blutter compiles the Dart VM runtime for the snapshot's Dart version,
+# then itself; it needs a C++20 compiler (gcc>=13). One CMake fix is required on
+# nixpkgs, because capstone headers install one level deeper than assumed:
+#   blutter/blutter/CMakeLists.txt: include_directories(AFTER ${CAPSTONE_INCLUDEDIR} ${CAPSTONE_INCLUDEDIR}/capstone)
+git clone --depth 1 https://github.com/worawit/blutter /tmp/blutter
+nix shell nixpkgs#gcc14 nixpkgs#cmake nixpkgs#ninja nixpkgs#pkg-config \
+          nixpkgs#capstone nixpkgs#icu nixpkgs#git -c \
+  python3 /tmp/blutter/blutter.py /tmp/narwal-apk/lib/arm64-v8a /tmp/blutter-out
+# protobuf message schemas: proto/mqtt/{srv,msg}/**/*.pb.dart — the whole app, not just map
+```
+
+`tools/extract_and_scan.py` does the `.so`→strings→topic grep if you only want
+endpoint and topic literals; that needs no Blutter build.
 
 ## Repo layout
 

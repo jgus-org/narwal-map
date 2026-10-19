@@ -16,7 +16,8 @@ Usage:
     export NARWAL_EMAIL=you@example.com
     python tools/narwal_cloud.py devices
     python tools/narwal_cloud.py ota-probe
-    python tools/narwal_cloud.py ota --path /ota-app-server/v1/ota/checkUpgrade
+    python tools/narwal_cloud.py ota
+    python tools/narwal_cloud.py ota --body '{"deviceId":"...","productKey":"..."}'
     python tools/narwal_cloud.py --region eu devices
 """
 
@@ -45,12 +46,20 @@ API_HOSTS = {
 }
 
 CLIENT_APPLICATION_ID = "2E3t5It3Dr"
-CLIENT_APP_VERSION = "2.7.03"
-CLIENT_VERSION_CODE = "175"
+# Matches the app build these endpoints were read out of:
+# com.narwal.pita_global 2.9.90 / versionCode 184.
+CLIENT_APP_VERSION = "2.9.90"
+CLIENT_VERSION_CODE = "184"
 LOGIN_PATH = "/user-authentication-server/v2/login/loginByEmail"
 REFRESH_PATH = "/user-authentication-server/v1/token/refresh"
 DEVICE_LIST_PATH = "/user-device-platform-server/device-info/getDeviceInfoList"
-OTA_PREFIX = "/ota-app-server"
+
+# Service prefix and endpoint paths read out of the app's own AOT snapshot
+# (libapp.so), not guessed.
+OTA_PREFIX = "/app-ota-server"
+OTA_CHECK_PATH = f"{OTA_PREFIX}/v1/firmware/upgrade/check"
+OTA_DESCRIBE_PATH = f"{OTA_PREFIX}/v1/firmware/current/version/describe"
+OTA_AUTO_STATE_PATH = f"{OTA_PREFIX}/v1/auto/upgrade/state"
 
 # The gateway routes by country_code; sending one that disagrees with the host
 # returns a generic 500000 rather than anything actionable.
@@ -239,18 +248,17 @@ def read_password(path: Path | None) -> str:
     return value
 
 
-OTA_CANDIDATE_PATHS = [
-    "/v1/ota/checkUpgrade", "/v1/ota/check", "/v1/ota/upgrade/check",
-    "/ota/checkUpgrade", "/v1/ota/getFirmwareVersion", "/v1/ota/query",
-    "/v1/ota/latest", "/v1/ota/firmware/latest", "/v1/ota/list",
-]
+OTA_ENDPOINTS = [OTA_CHECK_PATH, OTA_DESCRIBE_PATH, OTA_AUTO_STATE_PATH]
 
 
 async def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("command", choices=["devices", "ota", "ota-probe"])
     ap.add_argument("--region", default="us", choices=sorted(API_HOSTS))
-    ap.add_argument("--path", help="explicit OTA path for the ota command")
+    ap.add_argument("--path", default=OTA_CHECK_PATH,
+                    help=f"OTA path for the ota command (default {OTA_CHECK_PATH})")
+    ap.add_argument("--body", default="{}",
+                    help='JSON request body for the ota command')
     ap.add_argument("--password-file", type=Path)
     ap.add_argument("--cache", type=Path, default=DEFAULT_TOKEN_CACHE)
     ap.add_argument("--force-login", action="store_true")
@@ -273,17 +281,18 @@ async def main() -> int:
         if args.command == "devices":
             await cloud.devices()
         elif args.command == "ota":
-            if not args.path:
-                raise SystemExit("--ota needs --path")
-            status, body = await cloud.request("POST", args.path, {})
+            try:
+                body = json.loads(args.body)
+            except json.JSONDecodeError as exc:
+                raise SystemExit(f"--body is not valid JSON: {exc}") from exc
+            status, resp = await cloud.request("POST", args.path, body)
             print(f"POST {args.path} -> HTTP {status}")
-            print(json.dumps(_redact(body), indent=2, ensure_ascii=False, default=str))
+            print(json.dumps(_redact(resp), indent=2, ensure_ascii=False, default=str))
         else:
             print(f"probing {OTA_PREFIX} routes with an authenticated token")
-            for suffix in OTA_CANDIDATE_PATHS:
-                path = f"{OTA_PREFIX}{suffix}"
-                status, body = await cloud.request("POST", path, {})
-                snippet = json.dumps(body, default=str)[:120]
+            for path in OTA_ENDPOINTS:
+                status, resp = await cloud.request("POST", path, {})
+                snippet = json.dumps(resp, default=str)[:120]
                 print(f"  {status}  {path}  {snippet}")
     return 0
 

@@ -41,11 +41,22 @@ ROBOTS = {
 FIRMWARE_VERSION = "common/upgrade/get_firmware_version"
 CHECK_FIRMWARE = "common/upgrade/check_firmware"
 
-# Response fields: 1 = app version (int), 2 = app version string,
-# 3/4/5 = groups of component records {slot: {1: part, 2: version int, 3: version str}}.
+# GetFirmwareVersion_Response { 1 firmwareVersion, 2 firmwareVersionText,
+#                               3 robot, 4 station, 5 vision, 6 unifiedErrorCode }
 VERSION_INT = "1"
 VERSION_STR = "2"
+UNIFIED_ERROR_CODE = "6"
 COMPONENT_GROUPS = ("3", "4", "5")
+
+# Slot names come from FirmwareGroupMSG / FirmwareStationMSG / FirmwareVisionMSG
+# in the app's own proto tree; FirmwareVersionEntityMSG is
+# { 1 firmwareId, 2 version, 3 versionText }.
+COMPONENT_SLOTS = {
+    "3": {"1": "mcu", "2": "ble", "3": "cpu", "4": "media", "5": "sensorList"},
+    "4": {"1": "mcu", "2": "ble", "3": "cpu", "4": "media", "5": "mediaB"},
+    "5": {"1": "ai", "2": "cpu"},
+}
+GROUP_NAME = {"3": "robot", "4": "station", "5": "vision"}
 
 WAKE_TRIES = 5
 WAKE_TIMEOUT = 30.0
@@ -54,10 +65,19 @@ WAKE_TIMEOUT = 30.0
 def components(payload: dict) -> list[dict]:
     rows = []
     for group in COMPONENT_GROUPS:
+        slots = COMPONENT_SLOTS[group]
         for slot, part in sorted((payload.get(group) or {}).items(), key=lambda kv: int(kv[0])):
             if isinstance(part, dict) and part.get("1"):
-                rows.append({"group": group, "slot": slot, "part": part.get("1"),
+                rows.append({"group": GROUP_NAME[group], "slot": slot,
+                             "name": slots.get(slot, f"slot{slot}"),
+                             "part": part.get("1"),
                              "version": part.get("3"), "version_int": part.get("2")})
+            elif isinstance(part, list):
+                rows.extend({"group": GROUP_NAME[group], "slot": slot,
+                             "name": slots.get(slot, f"slot{slot}"),
+                             "part": item.get("1"),
+                             "version": item.get("3"), "version_int": item.get("2")}
+                            for item in part if isinstance(item, dict) and item.get("1"))
     return rows
 
 
@@ -100,7 +120,8 @@ async def query(name: str, host: str, check: bool) -> dict:
         print(f"  product_key={record['product_key']}  app={record['app_version']} "
               f"(int {record['app_version_int']})")
         for row in record["components"]:
-            print(f"  grp{row['group']}.{row['slot']}  {row['part']:<14} {row['version']}"
+            label = f"{row['group']}.{row['name']}"
+            print(f"  {label:<18} {row['part']:<14} {row['version']}"
                   f"   (int {row['version_int']})")
         if check:
             print(f"  check_firmware -> {json.dumps(record['check_firmware'], default=str)}")
