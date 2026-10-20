@@ -54,7 +54,7 @@ than a blocking fault.
 **Our own confirming observation is limited to**: the fault appears on clear
 carpet with visibly clear wheels, on both carpet units, while mapping.
 
-## Which subsystem owns it — measured live, and it is not the carpet logic
+## Which subsystem owns it — measured live, then named by the firmware itself
 
 An earlier version of this file reasoned from the error registry to the
 conclusion that the decision ran in the Linux-side application layer, above the
@@ -64,38 +64,99 @@ mistake: it inferred the reporter of *our* symptom from the code whose name
 matched the symptom, without measuring.
 
 What the unit actually reports while stuck on clear carpet, watched live with
-`tools/narwal_watch.py` on Huey (2026-10-19, 2,039 status frames):
+`tools/narwal_watch.py` on Huey (2026-10-19, 11,201 frames, 3,634 of them
+`robot_base_status`, 18:48:48 → 20:00:10):
 
 ```
-18:48:49 FAULT 36765735 (0x02310027 block=0x0231 kRightWheelStuck) kErrorLevel
-18:53:31 clear — mapping resumes
+18:48:49 FAULT 36765735 (0x02310027 kRightWheelStuck) kErrorLevel "右后驱轮卡住"
+18:49:51 clear  (one frame)
+18:49:52 FAULT  same code
+18:53:31 clear  — mapping continues; no fault again in the remaining 67 minutes
 ```
 
-One code for the whole 4 m 42 s episode, at `kErrorLevel`, on the **right wheel**,
-in block `0x0231` — the same block as the per-wheel stuck and over-current faults,
-*i.e.* the driver-side family. None of the `0x0211` carpet codes appeared, and
-neither did `kRobotBeTrappedWhenExplore`.
+One code across two consecutive episodes totalling 281 s, at `kErrorLevel`, on the
+**right rear drive wheel** — and that description is the firmware's own, carried in
+field 48 of the status message, not our guess. None of the `0x0211` carpet codes
+appeared, and neither did `kRobotBeTrappedWhenExplore`.
 
-So the live fault **is** the plain per-wheel stuck classifier, and the
-carpet-specific application-layer codes belong to some other path. What remains
-true from the static evidence: the served configuration tree contains no per-wheel
-current or stall threshold, the `robot.mcu` image is not in it, and `DrivingWheel`
-in `RobotConfigure.proto` carries only kinematics. With the reporter now known to
-be the driver-side block, the threshold's location is back to being genuinely
-open — most likely on the `robot.mcu` side, which we cannot read over this socket.
+The firmware then names its own owner. `application_conf/ErrorCodeConfig.conf`
+(given in full in `DEVICE_ERROR_CODES.md`) assigns `kRightWheelStuck` the strategy
+`kEmergencyStopStrategy`, `is_return_station: true`, and `maintainer: "感知应用"` —
+**the perception application**, which is the subsystem owning
+`perception/conf/conf/CarpetConfig.conf` and the node `kRobotPerceptionNode`. So the
+guess this file made an hour earlier, that the threshold was "most likely on the
+`robot.mcu` side, which we cannot read over this socket", is **wrong and is
+retracted**: the fault is raised by a userspace component whose configuration the
+LAN socket already serves to anyone.
 
-A sustained one-wheel "stuck" on carpet with clear wheels also points at a
-*specific* asymmetry (right wheel, repeatedly) rather than a general pile-
-resistance rule, which is worth checking against the other unit's episodes.
+That matters more than the code identity, because both things a patch would touch
+turn out to be *data*:
+
+- the **reaction** — `kEmergencyStopStrategy` is the stop-dead-and-wait-for-a-person
+  behaviour, and it is one line in a plaintext conf;
+- the **condition** — the stuck judgement is written out numerically in
+  `planning/conf/escape/EscapeStuck.conf`, and the tilt-based carpet classifier that
+  feeds perception is written out in `perception/conf/conf/CarpetConfig.conf`.
+
+## The numbers, as the firmware states them
+
+`EscapeStuck.conf`, the planning side's escape-stuck (脱困) judgement. The policy
+table assigns the "trapped while doing X" codes to planning (`应用规划`) and our
+per-wheel code to perception, so these are **neighbours, not proof** of the trip
+that stopped Huey. They are the closest thing to the real thresholds that exists
+outside the binary, and they describe a machine that stops on clear carpet:
+
+| Key | Value | Reading |
+|---|---|---|
+| `stuck_interval_time` / `stuck_interval_dist` | 10000 ms / 0.1 m | stuck = a 10 s window in which it moved < 10 cm |
+| `stuck_total_time` | 15000 ms | sustained long enough to be judged stuck at 15 s |
+| `stuck_total_time_without_slip` | **8000 ms** | a *shorter* budget when the wheels are judged **not** to be slipping |
+| `stuck_interval_time_without_slip` | 4000 ms | the window in that no-slip case |
+| `stuck_interval_angle_without_slip` | 0.8 rad | expected yaw progress in the same case |
+| `stuck_total_time_bumper_trigger` | 3 | bumper hits expected alongside it |
+| `slip_number_max` | 2 | consecutive slips before escalation |
+| `abnormal_attitude_pitch` / `abnormal_attitude_roll` | 0.04 / 0.03 rad | "abnormal attitude" = 2.3° pitch / 1.7° roll |
+| `abnormal_attitude_slip_time` | 2500 ms | abnormal attitude with slip for 2.5 s |
+| `check_yaw_period_sec` / `yaw_diff_theshold` | 3 s / 0.1 rad | yaw that does not change over 3 s (the misspelling is the firmware's) |
+| `cool_down_duration_sec` | 2 | "等待电流冷却" — wait for the current to cool down |
+| `rotate_escape_ang_vel` / `max_rotate_escape_time_sec` | 2.0 rad/s / 30 s | the escape spin it tries instead of stopping |
+
+Two of these are worth staring at, as *hypotheses to test*, not conclusions.
+`stuck_total_time_without_slip: 8000` means the robot allows itself **half** the
+immobile time when it believes the wheels are gripping — and a chassis high-centred
+on pile, wheels turning but not biting, is not obviously "slipping". And the
+attitude thresholds are 1.7° of roll and 2.3° of pitch: a robot walking into plush
+pile tilts by more than that, so `abnormal_attitude_*` is a plausible ingredient in
+what looks from outside like an unexplained stop on clear carpet.
+
+`CarpetConfig.conf` (perception) shows carpet is a **tilt and jitter** classifier,
+not a current measurement — `tilt_angle_th: 0.087` as the maximum credible tilt,
+roll/pitch acceptance windows of ±0.08 and −0.09…+0.08 rad, `point_n: 10`
+consecutive points before an area is declared carpet, quick decision at
+`quick_decision_confidence_th: 81` or `continuous_carpet_n_th: 4` agreeing frames,
+an SVM that ships **disabled** (`carpet_svm_config.enable: false`), `cobble_t: 2`
+where a "cobblestone" reading suppresses carpet for 2 s, height gates of
+`ground_height_th: 0.015` m with `protrusion_height_th: 0.03` /
+`hollow_height_th: -0.03`, and the cliff detector tripping on a sustained tilt of
+only `0.034` rad — *less* tilt than carpet needs, which is the sort of threshold
+spread worth measuring on our own pile heights.
+
+What still is not in the served set: any per-wheel **current** or stall threshold,
+and `DrivingWheel` in `RobotConfigure.proto` still carries only kinematics. The trip
+itself lives below the configuration layer, in the driver. But the reaction, the
+stuck timers, the attitude thresholds and the carpet classifier are all readable
+plaintext, off an unauthenticated socket, on every unit.
 
 ## Settings surface (recorded for completeness — not the plan)
 
-The fault is a drive-side stall trip deep inside closed firmware. Owner-visible
-settings have already been exercised on these units without resolving it, so
-**nothing below is expected to fix the fault**; it is catalogued only so the
-investigation doesn't re-derive it, and because some of it is useful *instrumentation*
-for the firmware work. The real path is disassembling the application-layer
-classifier that reports this fault — see `schema/DEVICE_ACQUISITION.md`.
+The fault is a stuck trip in the perception application, with a reaction selected
+from a config file — but the trip's inputs (wheel current, encoder) are still below
+the configuration layer. Owner-visible settings have already been exercised on these
+units without resolving it, so **nothing below is expected to fix the fault**; it is
+catalogued only so the investigation doesn't re-derive it, and because some of it is
+useful *instrumentation* for the firmware work. The real path is the perception
+classifier that reports the fault, whose owner the policy table now names — see
+`schema/DEVICE_ACQUISITION.md` and `schema/DEVICE_ERROR_CODES.md`.
 
 Ranked by how cheap it is to try.
 
@@ -128,9 +189,14 @@ Ranked by how cheap it is to try.
    returns **cleartext carpet-detection overlays** (`InitCarpet`, `GlobalCarpet`,
    `UpdateRoomN_PlanningCarpet`) — but only while the unit is mapping or
    cleaning, so capturing one during the failing pass requires running a job.
-   `StaticMapPayload` field 47 `robot_trapped_points` records *where* it got
-   trapped and field 48 is `exception_info_list`; **both are absent on all three
-   units at rest**, so they must be read immediately after a real stuck episode.
+   The other observability named here earlier is **retracted**: `display_map` was
+   watched through a full mapping pass plus an hour of idle and carries only fields
+   1, 2, 3, 5, 6, 7, 10, 11 and 12 — never 47 or 48. `robot_trapped_points` and
+   `exception_info_list` are fields of a cloud-side JSON model
+   (`nr_pita_worker_record_detail_model`), not of this message. What the status
+   stream does give during a fault is field 48's own description string, and a
+   listen for the `发现地毯` announcement — `kCarpetTriggered` itself is configured
+   `is_send_station: false`, so it is never visible here at all.
 
 ## The device's own config tree is readable — see `DEVICE_CONFIG.md`
 
@@ -141,16 +207,28 @@ device: `PassCarpet.conf`, `CarpetExplore.conf`, `CarpetConfig.conf`,
 `CrossingCommon.conf` and the `slip_ctrl` assist modules are all readable
 plaintext.
 
-Where it stops: those are *planning and perception* configs. No per-wheel current
-or stall threshold appears anywhere in the served set, and the drive MCU image is
-not part of it. Editing these files is a device mutation, not a settings change.
+Where it stops: no per-wheel **current** threshold appears anywhere in the served
+set, and the drive MCU image is not part of it — the trip itself is below the
+config layer. Everything *around* the trip is in there: the per-code reaction and
+owner in `application_conf/ErrorCodeConfig.conf`, the escape-stuck timers in
+`planning/conf/escape/EscapeStuck.conf`, the carpet classifier in
+`perception/conf/conf/CarpetConfig.conf` (all tabulated above). Reading them is
+free; editing them is a device mutation, not a settings change.
 
 ## What is *not* in either repo (searched, negative)
 
-Wheel speed / RPM / current / encoder, motor torque or current limits, wheel
-slip, stall, jam, bumper state, cliff sensor state, chassis-raise or
-wheel-height, stuck-recovery manoeuvres, obstacle-avoidance sensitivity.
-`octopus.core.ExceptionInfo` (map field 48) is referenced and never dumped.
+Wheel speed / RPM / current / encoder readings, motor torque or current limits,
+bumper state, chassis-raise or wheel-height, obstacle-avoidance sensitivity.
+
+Four entries on the earlier version of this negative list were **wrong** and move to
+the positive column because of `EscapeStuck.conf`: slip thresholds
+(`slip_number_max`, `abnormal_attitude_slip_time`), the stuck judgement itself, the
+bumper-trigger count, and the stuck-recovery manoeuvres (that file plus
+`EscapeStuckTree.xml`). The cliff detector's tilt threshold is also present, in
+`CarpetConfig.conf` — it is the cliff sensor's *state* that is not exposed.
+`octopus.core.ExceptionInfo` is referenced by the map schema and has never been
+dumped; what the status stream actually carries during a fault is in
+`DEVICE_ERROR_CODES.md`.
 
 The earlier note here that "numeric codes cannot be resolved offline" is
 **corrected**: the device's own fault registry — `protocol/error_code/protobuf/ErrorCode.proto` — was carved out of `libprotocol_protobuf.so` and is in `DEVICE_ERROR_CODES.md`, names and numbers intact.
@@ -164,8 +242,19 @@ the unauthenticated LAN socket (`DEVICE_ACQUISITION.md`), so the code that makes
 the carpet-stuck decision is in hand rather than behind an OTA service that
 returns nothing while a unit is current (`firmware_versions.md`).
 
-What remains is analysis, not acquisition: the application-layer classifier is
-named in the error registry but its thresholds are not in any config read so far,
-and the drive-side module library is still unlocated by name (no directory-listing
-primitive; see `DEVICE_ACQUISITION.md`). Patching a running unit would additionally
-require write access we do not have — reading is not root.
+What remains is analysis, not acquisition — and the analysis has narrowed a lot:
+the fault's owner is named by the firmware (`感知应用`, the perception application),
+its reaction is named (`kEmergencyStopStrategy`), the stuck timers and the carpet
+classifier's thresholds are written out in plaintext, and the live code is known.
+What is still not in hand is the perception module library that evaluates them (no
+directory-listing primitive; see `DEVICE_ACQUISITION.md`) and the wheel-current
+signal below it.
+
+Patching a *running* unit is a separate question from patching its code, and the
+honest answer is that neither is available today: the read is root-privileged but
+the write topics are not a write (`DEVICE_SECURITY.md`), so there is no way to put a
+file anywhere. The one candidate worth an experiment is the overlay the loader
+consults before `/oem` — `Dynamic File: {} not exists, use default path: {}` —
+because a config override there would need no code execution at all, only the
+existing `config_content/set`. That is untested, and any test of it writes to a
+robot, so it needs an explicit go-ahead first.

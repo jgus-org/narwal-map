@@ -84,6 +84,24 @@ every capture taken from a docked, idle robot. Field 25,
 `detergent`, `smartModule`, `cleanWaterTank`) and not a fault list at all — an
 earlier revision of these notes pointed at the wrong field.
 
+**The firmware sends the description too.** Field 48,
+`robotTaskListExternalV2` (`RobotBaseStatus.pb.dart` in the app), is empty except
+while a fault is up; through the whole episode it held one unchanged entry in all
+164 frames:
+
+```
+{ 1: 1, 2: { 1: 2, 2: 36765735, 3: "右后驱轮卡住" } }      # kind, identityCode, description
+```
+
+`右后驱轮卡住` = "right rear drive wheel stuck". `tools/narwal_watch.py` prints it
+beside the code, so a fault is identifiable from a capture with no local table.
+The remaining fields on that message are `47 chargingStatus` and `49
+batteryCooling`, both constant (`2`) across the capture. `display_map` carries only
+fields 1, 2, 3, 5, 6, 7, 10, 11 and 12: `robot_trapped_points` and
+`exception_info_list` are names from a cloud-side JSON model,
+`nr_pita_worker_record_detail_model`, which is where the earlier note took them
+from, and neither appeared.
+
 Wheel current, for comparison, is reported under different names and a different
 block:
 
@@ -103,10 +121,97 @@ block:
 Two things follow. First, **"stuck" and "over-current" are distinct conditions**
 in the firmware: `…StuckOnCarpet` (0x0211 block) is not
 `…WheelOverCurrent…` (0x0231 block), so the fault is not simply a current trip
-firing early — there is a separate stuck classifier that runs on carpet. Second,
-`kErrRobotFirstStuckOnCarpet` implies the detector has *state*: it distinguishes
-a first event from repeats, which means there is a threshold or counter worth
-finding.
+firing early. Second, `kErrRobotFirstStuckOnCarpet` implies that detector has
+*state* — it distinguishes a first event from repeats. But see the policy table
+below: on this firmware the `…StuckOnCarpet` family is declared and *unconfigured*,
+which is a better explanation for never seeing it than a threshold that was never
+reached.
+
+## The policy that follows each code
+
+`/oem/DISK/bin/pita/application_conf/ErrorCodeConfig.conf` (134 KB, plaintext, one
+of the served files in `DEVICE_CONFIG.md`) is not another enum. It is the **policy
+applied to each code** — 330 items — and it names the group that owns each one.
+Our fault's entry, verbatim:
+
+```
+#0x02310027
+#机器人在基站外运行全过程中，右后驱轮卡住
+err_code_config_item {
+  identity_code: kRightWheelStuck
+  level: kErrorLevel
+  description: "右后驱轮卡住"
+  strategy: kEmergencyStopStrategy
+  is_send_station: true
+  is_send_service: true
+  check_on_off: true
+  check_when_resume: false
+  is_return_station: true
+  maintainer: "感知应用"
+}
+```
+
+Three things come out of this that the enum alone could not give.
+
+- **The stop-and-wait-for-a-button behaviour is data.** `kEmergencyStopStrategy`
+  is the reaction, selected from a file, not a sequence baked into a function. So
+  is `is_return_station: true`.
+- **The owner is named**: `感知应用`, "perception application" — the same subsystem
+  that owns `CarpetConfig.conf` (`perception/conf/conf/`) and the `kCarpetTriggered`
+  code, and the `kRobotPerceptionNode` (49) of the node enum below. Not the dock MCU.
+- **Reporting is configured per code**, via `is_send_station` / `is_send_service`.
+
+Census over the 330 items — strategies `kStopAllTaskStrategy` 198,
+`kEmergencyStopStrategy` 85, `kNoStrategy` 45, `kDepartureStrategy` 2; levels
+`kFatalLevel` 211, `kErrorLevel` 79, `kNormalLevel` 26, `kWarnLevel` 14; maintainers
+`应用规划` (application planning) 161, `嵌入式系统` (embedded system) 69, `感知应用`
+(perception application) 48, `基站` (base station) 39, `视觉` (vision) 11,
+`结构` (structure) 1.
+
+The drive-related family:
+
+| identity_code | level | strategy | maintainer |
+|---|---|---|---|
+| `kBothWheelsStuck` | kErrorLevel | kEmergencyStopStrategy | 感知应用 |
+| `kLeftWheelStuck` | kErrorLevel | kEmergencyStopStrategy | 感知应用 |
+| `kRightWheelStuck` | kErrorLevel | kEmergencyStopStrategy | 感知应用 |
+| `kWheelLoseControl` | kFatalLevel | kStopAllTaskStrategy | 感知应用 |
+| `kBoth/Left/RightWheelOverCurrentRequiresRestart` | kFatalLevel | kStopAllTaskStrategy | 感知应用 |
+| `kRobotStuckLongTime` | kErrorLevel | kEmergencyStopStrategy | 应用规划 |
+| `kRobotBeTrappedWhenExplore` | kErrorLevel | kEmergencyStopStrategy | 应用规划 |
+| `kRobotBeTrappedWhenRoomClean` | kErrorLevel | kEmergencyStopStrategy | 应用规划 |
+| `kRobotBeTrappedWhenCarpetClean` | kErrorLevel | kEmergencyStopStrategy | 应用规划 |
+| `kCarpetTriggered` | kNormalLevel | kNoStrategy | 感知应用 |
+| `kErrDepartureSlip` | kFatalLevel | kStopAllTaskStrategy | 结构 |
+
+The split matches the block structure exactly: the per-wheel codes are owned by
+perception, the "trapped while doing X" codes by planning. Two classifiers, two
+owners, and our fault is perception's.
+
+### The carpet family is declared but not configured
+
+`kErrRobotFirstStuckOnCarpet`, `kErrRobotLeftWheelStuckOnCarpet` and
+`kErrRobotRightWheelStuckOnCarpet` exist in `ErrorCode.proto` and appear **nowhere
+else**: no policy item, no event condition, no action, no voice. Searching the
+1,254 served files pulled locally (of the 1,259 listed — see `DEVICE_CONFIG.md`) for
+`StuckOnCarpet` and `FirstStuck` returns zero hits. That is consistent with the
+live capture never showing them, and it makes "the carpet-specific path is not
+wired up on this firmware" the working explanation rather than a threshold we have
+yet to characterize. Absence of a policy item is not proof the code path is dead,
+but it is strong evidence that nothing on this build reacts if it were raised.
+
+### `kCarpetTriggered` cannot be observed on the socket
+
+The same table closes the experiment that the previous revision of this file
+proposed. Its policy is `is_send_station: false`, `is_send_service: false`, so
+carpet detection is **not reported over the status stream** and watching the
+socket can never show it, whether or not detection fires. The route that does work
+is the action list: `ErrorEventActionList.conf` maps `kEventTypeCarpetTriggered` to
+`voice_resource: "/userdata/usr/data/voice/voice220.mp3"` with
+`voice_text: "发现地毯"` ("carpet found") and `enable_in_disturb_mode: true` — so the
+unit *says* it when the perception layer decides it is on carpet. Listening during
+the failing pass, or capturing `developer/get_robot_debug_image` overlays, settles
+what the socket cannot.
 
 ## Block structure
 
@@ -155,28 +260,32 @@ kRobotMapServerNode = 48                    kRobotPerceptionNode = 49
 
 `HealthLevel` is `kNormalLevel`, `kWarnLevel`, `kErrorLevel`, `kFatalLevel`;
 `Strategy` is what the system does about it: `kNoStrategy`,
-`kEmergencyStopStrategy`, `kStopAllTaskStrategy`, `kDepartureStrategy`. A stuck
-event therefore has an associated *reaction* enum, which is where the
-"stop and demand a button press" behaviour is encoded.
+`kEmergencyStopStrategy`, `kStopAllTaskStrategy`, `kDepartureStrategy`. The enum is
+declared here, but the *assignment* is the per-code `strategy:` field in
+`ErrorCodeConfig.conf` (see above), so the reaction to a stuck event is chosen at
+run time from a file that the LAN socket will read out to anyone.
 
 ## What is still missing
 
-The trip *thresholds* are not in this library and not in any config read so far.
-The live fault is reported from the driver-side block, but the quantities behind
-it (wheel current, encoder, slip) come from `kRobotDriverNode`, and neither the
-driver library nor the MCU image has been located by name — see
-`DEVICE_ACQUISITION.md` for the acquisition state and the enumeration method.
+Named since the first version of this file: the fault's owner is `感知应用`, the
+perception application, and its reaction is `kEmergencyStopStrategy` from config.
+Still genuinely missing:
 
-Two more things to find now that the live code is known:
-
-- **Which classifier writes `0x0231`.** `kRightWheelStuck` at `kErrorLevel` for
-  four minutes is a sustained blocking fault, so there is a timer and a condition
-  worth naming, not just a trip.
-- **Why the carpet-specific family never fires.** `…StuckOnCarpet` exists in
-  `0x0211` and did not appear. If those codes require the perception layer to have
-  classified the surface as carpet, then the useful question is whether carpet
-  *detection* is firing at all on this pile height — which is testable through
-  `kCarpetTriggered` (`36766207`), a code the perception block emits when it
-  decides the robot is on carpet. Capture it on the same pass and the ambiguity
-  resolves: if `kCarpetTriggered` never appears on a known-carpet pass, the
-  generic stuck path is exactly what to fix.
+- **The code that raises `0x0231`.** The owner is known; the library is not. The
+  perception application's module library has not been located by name, because
+  there is no directory-listing primitive (`DEVICE_ACQUISITION.md`) and the `.dag`
+  graphs that would name it are still unfound. `CarpetConfig.conf` under
+  `perception/conf/conf/` is that subsystem's configuration and is the best place to
+  start naming candidates.
+- **The perception-side stuck condition itself.** `EscapeStuck.conf`
+  (`planning/conf/escape/`) states the *planning* side's judgement in plain numbers —
+  see `CARPET.md`. Whether perception's classifier shares those timers or uses its
+  own in code is unmeasured, and the policy table says the two owners are different,
+  so they should not be assumed identical.
+- **The quantities behind the trip.** Wheel current, encoder and slip come from
+  `kRobotDriverNode`; neither the driver library nor the `robot.mcu` image has been
+  located by name.
+- **Whether carpet detection fires.** Not answerable through the socket, since
+  `kCarpetTriggered` is sent to neither station nor service. Listen for the
+  `发现地毯` announcement, or capture the `developer/get_robot_debug_image` carpet
+  overlays, during a known-carpet pass.

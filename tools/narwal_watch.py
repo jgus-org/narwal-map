@@ -12,12 +12,23 @@ AOT snapshot, and the code values from the device's `ErrorCode.proto`:
 
     status/robot_base_status    1  errorCode { 1 identityCode, 2 level }
     status/robot_base_status   25  deviceStatusCodeList (consumables, not faults)
-    map/display_map            47  robot_trapped_points   (StaticMapPayload)
-    map/display_map            48  exception_info_list    (StaticMapPayload)
+    status/robot_base_status   47  chargingStatus
+    status/robot_base_status   48  robotTaskListExternalV2
+                                   { 1 task { 2 item { 1 kind, 2 identityCode,
+                                                       3 description } } }
+    status/robot_base_status   49  batteryCooling
 
-An empty `errorCode` means no active fault. Fields 47/48 are absent while a unit
-is idle, so this records raw payloads for every topic and the decoding can be
-redone offline:
+An empty `errorCode` means no active fault. Field 48 is empty except while a
+fault is up, and its `description` is the firmware's own text for the code, so
+the fault can be identified without any table at all. `display_map` carries only
+fields 1, 2, 3, 5, 6, 7, 10, 11 and 12; the `robot_trapped_points` /
+`exception_info_list` names belong to a cloud-side JSON model
+(`nr_pita_worker_record_detail_model`), not to this message.
+
+Codes configured `is_send_station: false` in `application_conf/ErrorCodeConfig.conf`
+never appear on the status stream at all — `kCarpetTriggered` is one of them, so
+its absence from a capture says nothing about whether carpet detection fired.
+This records raw payloads for every topic and the decoding can be redone offline:
 
     from tools.narwal_watch import wire_fields
     wire_fields(bytes.fromhex(open(line).read()))
@@ -71,6 +82,11 @@ ROBOTS = {
 ERROR_CODE_FIELD = 1
 IDENTITY_CODE_FIELD = 1
 LEVEL_FIELD = 2
+TASK_LIST_FIELD = 48
+TASK_ENTRY_FIELD = 1
+TASK_ITEM_FIELD = 2
+ITEM_CODE_FIELD = 2
+ITEM_TEXT_FIELD = 3
 HEALTH_LEVELS = {0: "kNormalLevel", 1: "kWarnLevel", 2: "kErrorLevel", 3: "kFatalLevel"}
 
 # From ErrorCode.proto, the device-internal registry. Only entries that bear on
@@ -155,6 +171,28 @@ def read_varint(payload: bytes, pos: int) -> tuple[int, int]:
             raise ValueError("varint too long")
 
 
+def fault_labels(payload: bytes) -> dict[int, str]:
+    """identityCode -> the firmware's own description of it, from field 48.
+
+    The description is sent by the device, so a fault can be named without any
+    local table. It is Chinese on every unit, whichever language the app uses.
+    """
+    labels: dict[int, str] = {}
+    for blob in wire_fields(payload).get(TASK_LIST_FIELD, []):
+        if not isinstance(blob, bytes):
+            continue
+        for entry in wire_fields(blob).get(TASK_ENTRY_FIELD, []):
+            if not isinstance(entry, bytes):
+                continue
+            for item in wire_fields(entry).get(TASK_ITEM_FIELD, []):
+                inner = wire_fields(item)
+                code = inner.get(ITEM_CODE_FIELD, [None])[0]
+                text = inner.get(ITEM_TEXT_FIELD, [b""])[0]
+                if isinstance(code, int) and isinstance(text, bytes):
+                    labels[code] = text.decode("utf-8", "replace")
+    return labels
+
+
 def code_text(value: int) -> str:
     name = ERROR_CODES.get(value)
     block, offset = value >> 16, value & 0xFFFF
@@ -205,8 +243,10 @@ class Recorder:
 
         faults = active_faults(payload) if topic.endswith("robot_base_status") else []
         if faults and tuple(faults) != self.previous:
+            labels = fault_labels(payload)
             print(f"[{time.monotonic() - self.started:8.1f}s] {topic} FAULT "
                   + " ".join(f"{code_text(c)} level={HEALTH_LEVELS.get(l, l)}"
+                             + (f' "{labels[c]}"' if c in labels else "")
                              for c, l in faults), flush=True)
             self.previous = tuple(faults)
         elif not faults and self.previous:

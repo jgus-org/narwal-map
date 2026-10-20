@@ -62,6 +62,30 @@ the safe side of it.
 The write topics are still **not wrapped by `tools/narwal_dynconf.py`**, which
 implements `list`, `cat` and `pull` only.
 
+### What the overlay would be worth, and the one test left
+
+Not being able to overwrite a binary does not make the overlay academic. Behind it
+sits the entire behaviour surface documented in `DEVICE_ERROR_CODES.md` and
+`CARPET.md`: `ErrorCodeConfig.conf`, which decides what *reaction* each fault
+produces; `EscapeStuck.conf`, which holds the stuck timers; `CarpetConfig.conf`,
+which holds the carpet classifier. A write that landed in the overlay would be a
+**behaviour patch requiring no code execution at all** — which is why it is the one
+write experiment worth doing before concluding that this socket cannot change what a
+robot does.
+
+What is untested is the mapping from a write request to an overlay path. The handler
+takes an absolute path and answers `success: 1`; the only observed consequence so
+far is nothing. The content-preserving test is to write the **identical bytes** of a
+served config and then check whether the corresponding
+`/userdata/dynamic_params/…` path — unreadable before — becomes readable. That is a
+device mutation and needs an explicit go-ahead.
+
+One write-shaped surface found later is still unprobed: perception is configured with
+`carpet_map_config.file_upload_path: "/userdata/upload/data/perception/"`, and
+`/developer/file_upload` (`schema/topics_all.txt:207`) is a topic nobody has sent
+anything to. A handler written to receive files is a different code path from the
+config setter, and the last one on the list.
+
 ## Other listeners: none useful
 
 TCP scan of all three units over 21 ports. Only two results:
