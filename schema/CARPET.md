@@ -54,30 +54,39 @@ than a blocking fault.
 **Our own confirming observation is limited to**: the fault appears on clear
 carpet with visibly clear wheels, on both carpet units, while mapping.
 
-## Which subsystem owns it — narrowed by the firmware's own error registry
+## Which subsystem owns it — measured live, and it is not the carpet logic
 
-The threshold plausibly sits in the motor/sensor MCU and the escalation in the
-Linux-side app. That began as an inference from the two-CPU architecture pattern
-in the vendor's earlier product, and two measurements now bear on it.
+An earlier version of this file reasoned from the error registry to the
+conclusion that the decision ran in the Linux-side application layer, above the
+driver, because the `…StuckOnCarpet` codes live in the application block `0x0211`.
+**A live capture of the real fault refutes that**, and the reasoning was the
+mistake: it inferred the reporter of *our* symptom from the code whose name
+matched the symptom, without measuring.
 
-First, the device's own served configuration tree (`DEVICE_CONFIG.md`) carries
-planning and perception behaviour parameters and **no** per-wheel current or
-stall threshold, and the drive MCU image (`robot.mcu` / `0210_DR_GD0C`) is not
-part of that tree.
+What the unit actually reports while stuck on clear carpet, watched live with
+`tools/narwal_watch.py` on Huey (2026-10-19, 2,039 status frames):
 
-Second, the error registry carved out of the device's
-`/oem/DISK/bin/pita/lib/libprotocol_protobuf.so` (`DEVICE_ERROR_CODES.md`)
-separates the two conditions by code block:
-`kErrRobotFirstStuckOnCarpet` / `kErrRobot{Left,Right}WheelStuckOnCarpet` are in
-the **application** block `0x0211`, while `k{Both,Left,Right}WheelStuck` and
-`k…WheelOverCurrentRequiresRestart` are in block `0x0231`. So "stuck on carpet"
-is **not** a wheel over-current trip reported early — it is its own classifier,
-and it runs in the Linux-side application layer, above the driver. The
-quantities it watches still come from `kRobotDriverNode`, so the MCU remains the
-source of the inputs; the *decision* is not in the MCU.
+```
+18:48:49 FAULT 36765735 (0x02310027 block=0x0231 kRightWheelStuck) kErrorLevel
+18:53:31 clear — mapping resumes
+```
 
-That also means the decision-maker is code we can pull and disassemble over the
-LAN socket, and the event has numeric codes we can watch for live.
+One code for the whole 4 m 42 s episode, at `kErrorLevel`, on the **right wheel**,
+in block `0x0231` — the same block as the per-wheel stuck and over-current faults,
+*i.e.* the driver-side family. None of the `0x0211` carpet codes appeared, and
+neither did `kRobotBeTrappedWhenExplore`.
+
+So the live fault **is** the plain per-wheel stuck classifier, and the
+carpet-specific application-layer codes belong to some other path. What remains
+true from the static evidence: the served configuration tree contains no per-wheel
+current or stall threshold, the `robot.mcu` image is not in it, and `DrivingWheel`
+in `RobotConfigure.proto` carries only kinematics. With the reporter now known to
+be the driver-side block, the threshold's location is back to being genuinely
+open — most likely on the `robot.mcu` side, which we cannot read over this socket.
+
+A sustained one-wheel "stuck" on carpet with clear wheels also points at a
+*specific* asymmetry (right wheel, repeatedly) rather than a general pile-
+resistance rule, which is worth checking against the other unit's episodes.
 
 ## Settings surface (recorded for completeness — not the plan)
 
