@@ -73,12 +73,40 @@ which holds the carpet classifier. A write that landed in the overlay would be a
 write experiment worth doing before concluding that this socket cannot change what a
 robot does.
 
-What is untested is the mapping from a write request to an overlay path. The handler
-takes an absolute path and answers `success: 1`; the only observed consequence so
-far is nothing. The content-preserving test is to write the **identical bytes** of a
-served config and then check whether the corresponding
-`/userdata/dynamic_params/…` path — unreadable before — becomes readable. That is a
-device mutation and needs an explicit go-ahead.
+The mapping is not guesswork — it is in a served file.
+`application_conf/developer/DynamicParamsConfig-default.conf`:
+
+```
+params_path: "/userdata/dynamic_params"
+internal_config_path: "/internal_dynamic_params/conf"
+node_configs { key: "application"
+  value { oem_dir: "/oem/DISK/bin/pita/application/conf"
+          custom_dir: "custom/application/conf" } }      # + planning, perception
+```
+
+so a served config at `<oem_dir>/<tail>` is shadowed by
+`/userdata/dynamic_params/custom/<node>/conf/<tail>`. Every mapped candidate that
+matters reads back **absent** on Louie, including
+`custom/application/conf/ErrorCodeConfig.conf`,
+`custom/planning/conf/escape/EscapeStuck.conf`,
+`custom/perception/conf/conf/CarpetConfig.conf` and `custom/` itself — with the
+oracle's three states pinned by controls: absent returns an empty `fileInfo` and
+keeps the connection open, a *directory* closes the connection (`applying` does
+exactly that), and a present file returns content. The overlay tree has therefore
+never been written on our units.
+
+That makes the experiment well-formed rather than circular: read `/oem/…<file>` for
+the *payload*, write those **identical bytes**, then measure a **different path** —
+the mapped overlay destination, measured absent beforehand. Content-identity is what
+keeps it non-mutating in behaviour, since `config/delete` is `"Not implemented"` and
+an overlay entry may be permanent; the live risk is a handler that transforms the
+payload, leaving a malformed overlay copy shadowing the good file with no way to
+delete it. So the target should be a config that is served but **not the active
+profile** — an inactive `feature_flags/FeatureFlags-*.conf` variant, say — where a
+malformed copy shadows nothing. A positive result proves the write lands and names
+the mapping; a negative one is weaker, because the copy could be staged under
+`applying/` or `internal_config_path` instead, so probe those too. Still needs an
+explicit go-ahead.
 
 One write-shaped surface found later is still unprobed: perception is configured with
 `carpet_map_config.file_upload_path: "/userdata/upload/data/perception/"`, and
