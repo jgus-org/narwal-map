@@ -1,10 +1,13 @@
 # narwal-map
 
-Reverse-engineering the **Narwal Flow 2** robot vacuum's local map-edit protocol, to script room splits/merges the official Narwal Freo app can't do — specifically **atomic multi-doorway cuts** for "donut"/annulus floor topologies.
+Reverse-engineering the **Narwal Flow 2** robot vacuum over its local protocol. Two lines of work live here: scripting **map edits** the official app won't do (atomic multi-doorway cuts for "donut"/annulus floor topologies), and investigating the **stuck-on-carpet** fault, including what the firmware would and would not let us patch.
 
-## The problem
+The repo is effectively `narwal-tools` — protocol RE plus the CLIs that drive it.
 
-A space that's two rooms joined by **two** doorways is topologically a ring ("O"). Cutting one doorway leaves it connected through the other (a "C" — still one region), so the robot rejects a single cut as a no-op. You must cut **both doorways atomically**, which the app's UI refuses to let you draw. The app is the limitation; the robot's protocol is not.
+## The problems
+
+1. **Donut cuts.** A space that's two rooms joined by **two** doorways is topologically a ring ("O"). Cutting one doorway leaves it connected through the other (a "C" — still one region), so the robot rejects a single cut as a no-op. You must cut **both doorways atomically**, which the app's UI refuses to let you draw. The app is the limitation; the robot's protocol is not.
+2. **Stuck on carpet.** Two of three units stop dead mid-mapping on clear carpet — no obstruction, wheels visibly clear, just pile resistance — and demand a button press. The third unit, on hard floor only, never does. See `schema/CARPET.md` for the mechanism and the writable surface, `schema/DEVICE_CONFIG.md` for what the device itself will tell you over the LAN socket, `schema/DEVICE_ACQUISITION.md` for how its firmware comes off the device and what stack it turned out to be, and `schema/DEVICE_ERROR_CODES.md` for the fault's own names in the firmware's error registry.
 
 ## Key findings
 
@@ -12,6 +15,9 @@ A space that's two rooms joined by **two** doorways is topologically a ring ("O"
 - The full map-edit protocol exists locally (proto package `octopus.mqtt.msg`, app codename "octopus"/"pita"). Edit topics: `/map/get_editable_map`, `/map/operation` (a.k.a. `/map_edit`, `/room_split_and_merge`), `/map/save_map_update_info`, `/map/set_update_regions`, `/telecontrol/get_two_rooms_crossing_point`. Full topic list in `schema/topics_all.txt`.
 - The edit command **`MapOperation.Request` carries a *repeated* `operations` list** → multiple operations applied together. This is the unlock: two `RoomSegOperation`s (two cut lines) in one request = the simultaneous double-cut the app won't allow.
 - The robot **validates server-side** (see `schema/error_codes.txt`): adjacency for merge, valid split segment, no overlap, min room area, max room count (`EditConfig.max_room_nums`), in-border, room-id consistency, and **`UNMATCHED_EDIT_VERSION`** — the editable map carries an `edit_version` you must echo on save (get → edit → save round-trip).
+- That same unauthenticated socket is also an **arbitrary file read**: `dynamic_params/config_content/get` serves any path the robot's application process can read, and it carries **binary intact, byte-exactly**. So the firmware does not have to be found, bought, leaked, or unpacked — it comes off the robot. It is a **Horizon Robotics X5** running **Buildroot 2022.08**, AArch64, on **Apollo Cyber RT + ROS 1**. The missing primitive is a directory listing, so the work is *naming* files, not reading them. See `schema/DEVICE_ACQUISITION.md`.
+- The read is **root-privileged** (`/etc/shadow` reads), but `config_content/set` is **not** a file write: it answers `success: 1 "Update file success!"` for any absolute path and writes nothing outside its own config overlay. Nothing else listens — port 22 is closed on all three units — and there are **zero published CVEs** for Narwal, the Horizon X5, Cyber RT, or ROS 1 core. See `schema/DEVICE_SECURITY.md`.
+- The carpet fault, measured live: `kRightWheelStuck` (`0x02310027`), described by the firmware itself as `右后驱轮卡住` ("right rear drive wheel stuck"), owned by `maintainer: "感知应用"` and reacted to with `kEmergencyStopStrategy` — **all of it declared in plaintext config the socket serves**, alongside the escape-stuck timers and the tilt-based carpet classifier. See `schema/CARPET.md` and `schema/DEVICE_ERROR_CODES.md`.
 
 See `proto/narwal_map_edit.proto` for the message schemas and `schema/SCHEMA.txt` for the raw extracted field list of all 76 messages.
 
@@ -72,22 +78,49 @@ Cut: drag a line across a room (the live overlay greys other rooms and colours t
 
 ## Regenerating the decompile (heavy artifacts, not committed)
 
-The 254 MB XAPK, `libapp.so`/`libflutter.so` (regenerable), and full Blutter output are excluded. To rebuild:
+The 138 MB `.apks` bundle, `libapp.so`/`libflutter.so` (regenerable), and full Blutter output are excluded. To rebuild:
 
 ```bash
-# Download the app (Flutter; package com.narwal.pita_global)
-nix-shell -p apkeep --run "apkeep -a com.narwal.pita_global -d apk-pure /tmp/narwal-apk"
-#   then unzip the .xapk, pull config.arm64_v8a.apk's lib/arm64-v8a/{libapp.so,libflutter.so}
-#   (tools/extract_and_scan.py does this + greps strings for topics)
+# Download the app (Flutter; package com.narwal.pita_global).
+# APKMirror serves the Google Play split bundle; its download needs two
+# per-session tokens harvested in sequence (page -> /download/?key= -> download.php).
+UA='Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36'
+curl -sSL -A "$UA" -c /tmp/am.jar -o /tmp/am_dl.html \
+  https://www.apkmirror.com/apk/narwal-intelligence-technology/narwal/narwal-2-9-90-release/narwal-2-9-90-android-apk-download/
+# grep the '/download/?key=' href out of that page, follow it, grep the
+# 'download.php?id=...&key=...' href from that, then:
+curl -sSL -A "$UA" -b /tmp/am.jar -o /tmp/narwal.apks '<download.php URL>'
 
-# Decompile (Dart 3.9.2). Blutter needs a one-line CMake fix on nixpkgs:
-#   blutter/CMakeLists.txt: include_directories(AFTER ${CAPSTONE_INCLUDEDIR} ${CAPSTONE_INCLUDEDIR}/capstone)
-git clone --depth 1 https://github.com/worawit/blutter /tmp/blutter
-nix-shell -p cmake ninja pkg-config icu capstone git \
-  "python3.withPackages(ps: with ps; [pyelftools requests])" \
-  --run "python3 /tmp/blutter/blutter.py /tmp/narwal-apk/lib /tmp/blutter-out"
-# protobuf message schemas: asm/app_protol/proto/mqtt/{srv,msg}/map/*.pb.dart
+# There is no gzip in this environment, so use bsdtar, not GNU tar.
+mkdir -p /tmp/narwal-apk
+bsdtar -xf /tmp/narwal.apks -C /tmp/narwal-apk split_config.arm64_v8a.apk
+bsdtar -xf /tmp/narwal-apk/split_config.arm64_v8a.apk -C /tmp/narwal-apk \
+  lib/arm64-v8a/libapp.so lib/arm64-v8a/libflutter.so
 ```
+
+`apkeep -d apk-pure` does **not** work here: its source-risk warning is TTY-gated
+(`--acknowledge-source-risk` is not a real flag, and piping `y` on stdin does not
+satisfy it), and apkpure's own download endpoint returns 403 to curl.
+
+Verified identity of the build used: `com.narwal.pita_global` versionName
+**2.9.90**, versionCode **184**, arm64-v8a only, minSdk 24. The engine reports
+**Dart 3.9.2 (stable)** — read out of `libflutter.so`, so that version is measured
+against this binary rather than inherited from the earlier decompile.
+
+```bash
+# Decompile. Blutter compiles the Dart VM runtime for the snapshot's Dart version,
+# then itself; it needs a C++20 compiler (gcc>=13). One CMake fix is required on
+# nixpkgs, because capstone headers install one level deeper than assumed:
+#   blutter/blutter/CMakeLists.txt: include_directories(AFTER ${CAPSTONE_INCLUDEDIR} ${CAPSTONE_INCLUDEDIR}/capstone)
+git clone --depth 1 https://github.com/worawit/blutter /tmp/blutter
+nix shell nixpkgs#gcc14 nixpkgs#cmake nixpkgs#ninja nixpkgs#pkg-config \
+          nixpkgs#capstone nixpkgs#icu nixpkgs#git -c \
+  python3 /tmp/blutter/blutter.py /tmp/narwal-apk/lib/arm64-v8a /tmp/blutter-out
+# protobuf message schemas: proto/mqtt/{srv,msg}/**/*.pb.dart — the whole app, not just map
+```
+
+`tools/extract_and_scan.py` does the `.so`→strings→topic grep if you only want
+endpoint and topic literals; that needs no Blutter build.
 
 ## Repo layout
 
@@ -95,11 +128,17 @@ nix-shell -p cmake ninja pkg-config icu capstone git \
 - `schema/SCHEMA.txt` — raw field-list dump of all 76 messages (from `tools/parse_pb.py`).
 - `schema/StaticMapPayload.descriptor.txt` — `protoc --decode_raw` of the embedded descriptor (ground-truth map schema).
 - `schema/staticmap.desc` — the binary descriptor.
-- `schema/topics_all.txt` — every WebSocket topic string in the app (783).
+- `schema/topics_all.txt` — every path-shaped string in the app (783). **Not all are protocol topics:** the file mixes real LAN topics (multi-segment, usually with a `/response` sibling) with ~250 Flutter page routes (single `snake_case` token, e.g. `/carpet_set_page_v3`, `/floor_material`, `/oem_carpet_set`), cloud REST paths, and filesystem paths. Treat any single-token `snake_case` entry as UI, not something to send the robot.
 - `schema/error_codes.txt` — raw `ERROR_CODE_*` strings dump (provenance).
 - `schema/error_codes.md` — authoritative numbered `ServiceResult` (result) + `ErrorCode` (error_code) enums for `MapOperation.Response`, decoded from the app.
 - `schema/MAP_DATA_FORMAT.md` — decoded `map_data` grid format, coordinate frames, and HACS-client field corrections.
+- `schema/firmware_versions.md` — model identity, the per-component firmware table read live off all three units, the OTA service surface and what each endpoint actually returns, and the chipset correction (Horizon X5, not the Allwinner part its predecessor used).
+- `schema/DEVICE_CONFIG.md` — the 1259 config files the device serves over the unauthenticated LAN socket, the exact request encoding that works, and the carpet/crossing parameters read out of them.
+- `schema/DEVICE_ACQUISITION.md` — the same socket as a binary-exact file-read primitive (and its integrity proof), the measured software stack, the pulled-library inventory, how schemas are carved out of stripped `.so` files, and the cloud-OTA status.
+- `schema/DEVICE_ERROR_CODES.md` — the device's own error-code registry, recovered from `libprotocol_protobuf.so`: the fault's actual live code (`kRightWheelStuck`, seen in a real episode) and the description the firmware sends with it, the `(block << 16) | offset` encoding, and `ErrorCodeConfig.conf` — the per-code policy table that names each fault's level, reaction, and owning subsystem.
+- `schema/DEVICE_SECURITY.md` — what the unauthenticated socket is actually worth: root-privileged read, why the write topics are **not** an arbitrary write (measured), the only two open ports, and the ranked paths to code execution.
+- `schema/CARPET.md` — the stuck-on-carpet investigation: what the fault actually is (measured live, then matched to the firmware's own owner and reaction), the escape-stuck and carpet-classifier thresholds as the device states them, negative results, and what a fix would have to touch.
 - `asm/{srv_map,msg_map}/` — Blutter disassembly of the map proto messages (evidence/provenance).
-- `tools/` — `parse_pb.py` (asm→schema), `show_msg.py`, `extract_desc.py`/`harvest_desc.py` (descriptor harvest), `extract_and_scan.py` (APK→.so→strings), `narwal_read.py` (live read), `narwal_crossing.py` (doorway crossing points), `decode_map.py` (grid decode/render), `narwal_ops.py` (shared op encoders + grid decode), `narwal_cut.py` (cut CLI).
+- `tools/` — `parse_pb.py` (asm→schema), `show_msg.py`, `extract_desc.py`/`harvest_desc.py` (descriptor harvest), `extract_and_scan.py` (APK→.so→strings), `narwal_read.py` (live read), `narwal_crossing.py` (doorway crossing points), `decode_map.py` (grid decode/render), `narwal_ops.py` (shared op encoders + grid decode), `narwal_cut.py` (cut CLI), `narwal_carpet.py` (per-unit carpet objects + `cleanOption`), `narwal_firmware.py` (per-component firmware inventory), `narwal_dynconf.py` (the device's file subsystem, read-only: `list` / `cat` / `pull`; `pull` is byte-exact for binaries), `carve_proto.py` (recover embedded protobuf schemas and enum values from stripped `.so`/ELF files), `narwal_watch.py` (record live status broadcasts and name the fault codes as they appear), `narwal_cloud.py` (authenticated account API: device list, OTA endpoints).
 - `tools/mapedit/` — local click-to-cut/merge web tool (`server.py` + `index.html`).
 - `flake.nix` — `nix run .` launches the map-edit tool (bundles the Python deps); `nix develop` for a dev shell.

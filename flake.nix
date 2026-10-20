@@ -24,7 +24,7 @@
         pythonImportsCheck = [ "blackboxprotobuf" ];
       };
 
-      pyEnv = pkgs.python3.withPackages (p: [ p.aiohttp p.websockets bbpb ]);
+      pyEnv = pkgs.python3.withPackages (p: [ p.aiohttp p.websockets p.cryptography bbpb ]);
 
       # Runs the working-tree server.py (not a store copy) so index.html/server.py edits stay live.
       # narwal_client is added to sys.path by server.py from /service at runtime (this host).

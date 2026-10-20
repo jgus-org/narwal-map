@@ -6,3 +6,6 @@ __pycache__/
 *.pyc
 /tmp/
 result
+
+/dev/shm/narwal-cloud/
+narwal-cloud-tokens.json
