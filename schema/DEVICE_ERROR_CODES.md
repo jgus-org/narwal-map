@@ -192,13 +192,16 @@ owners, and our fault is perception's.
 
 `kErrRobotFirstStuckOnCarpet`, `kErrRobotLeftWheelStuckOnCarpet` and
 `kErrRobotRightWheelStuckOnCarpet` exist in `ErrorCode.proto` and appear **nowhere
-else**: no policy item, no event condition, no action, no voice. Searching the
-1,254 served files pulled locally (of the 1,259 listed — see `DEVICE_CONFIG.md`) for
-`StuckOnCarpet` and `FirstStuck` returns zero hits. That is consistent with the
-live capture never showing them, and it makes "the carpet-specific path is not
-wired up on this firmware" the working explanation rather than a threshold we have
-yet to characterize. Absence of a policy item is not proof the code path is dead,
-but it is strong evidence that nothing on this build reacts if it were raised.
+else**: no policy item, no event condition, no action, no voice. The search covers
+the served set end to end: 1,254 entries searched by content, `PlanningRecord.conf`
+and `param.conf` read back empty when asked for directly, the two `.gitkeep` entries
+are placeholders, and `application/conf/private_key.pem` is the only entry
+deliberately left unread. `StuckOnCarpet` and `FirstStuck` return zero hits. That is
+consistent with the live capture never showing them, and it makes "the carpet-specific
+path is not wired up on this firmware" the working explanation rather than a
+threshold we have yet to characterize. Absence of a policy item is not proof the code
+path is dead, but it is strong evidence that nothing on this build reacts if it were
+raised.
 
 ### `kCarpetTriggered` cannot be observed on the socket
 

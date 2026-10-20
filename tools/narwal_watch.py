@@ -185,6 +185,8 @@ def fault_labels(payload: bytes) -> dict[int, str]:
             if not isinstance(entry, bytes):
                 continue
             for item in wire_fields(entry).get(TASK_ITEM_FIELD, []):
+                if not isinstance(item, bytes):
+                    continue
                 inner = wire_fields(item)
                 code = inner.get(ITEM_CODE_FIELD, [None])[0]
                 text = inner.get(ITEM_TEXT_FIELD, [b""])[0]
