@@ -136,13 +136,22 @@ The served `conf/robot_device.ini` is a template (`deviceId = 0`,
 
 ## What this does and does not establish
 
-It does **not** contain a drive-motor current or stall threshold. Searching the
-served names for motor/wheel/torque/current/stall/slip finds planning-level
-behaviour configs and the `slip_ctrl` assist modules, but no per-wheel
-over-current limit. That is consistent with the trip living in the drive MCU
-(`robot.mcu`, `0210_DR_GD0C`), which does **not** appear in this file set — this
-tree is the Linux-side application's configuration only.
+It does **not** contain a drive-motor **current** threshold. Searching the served
+names for motor/wheel/torque/current/stall finds planning-level behaviour configs
+and the `slip_ctrl` assist modules, but no per-wheel over-current limit — that part
+of the trip plausibly lives in the drive MCU (`robot.mcu`, `0210_DR_GD0C`), which
+does **not** appear in this file set, since this tree is the Linux-side
+application's configuration only.
 
-So the fault's threshold is not a file we have read yet, and these config files
-are editable-but-device-owned: changing them is a device mutation, not a settings
-change.
+What it *does* contain, and which an earlier revision of this file denied, is the
+judgement around the trip: `planning/conf/escape/EscapeStuck.conf` (stuck timers,
+slip and attitude thresholds), `perception/conf/conf/CarpetConfig.conf` (the
+tilt-based carpet classifier), and `application_conf/ErrorCodeConfig.conf` (each
+fault's level, reaction and owning subsystem — the file that names our fault's
+owner as the perception application and its reaction as
+`kEmergencyStopStrategy`). All tabulated in `CARPET.md` and
+`DEVICE_ERROR_CODES.md`.
+
+These files are editable-but-device-owned: changing them is a device mutation, not
+a settings change, and the write path for doing so is documented as not working in
+`DEVICE_SECURITY.md`.

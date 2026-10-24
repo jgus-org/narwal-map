@@ -101,9 +101,10 @@ Pulled with `narwal_dynconf.py pull louie <paths> --out <dir>`:
 | `lib/libprotocol_protobuf.so` | 26,488 | the error-code registry, see `DEVICE_ERROR_CODES.md` |
 
 `/etc/inittab`, `/etc/profile`, `/etc/fstab`, `/etc/passwd` and
-`/proc/self/exe` also read normally. Note `/etc/passwd` gives `root` a
-`/bin/bash` login shell and an `sshd` account exists; whether a daemon listens
-was **not** tested.
+`/proc/self/exe` also read normally. `/etc/passwd` gives `root` a `/bin/bash`
+login shell and an `sshd` account exists, but **port 22 is closed on all three
+units** and `/etc/inittab`'s only `getty` line is commented out, so there is no
+login service on the other end of that shell — see `DEVICE_SECURITY.md`.
 
 ### Enumerating without a listing
 
@@ -175,15 +176,26 @@ Meanwhile the LAN read primitive needs no cloud, no unpacker, and no exploit.
 
 1. Acquisition is solved: any readable file, including stripped binaries, comes
    off the LAN socket byte-exactly.
-2. The Linux-side config tree and the Linux-side schemas contain **no wheel
-   current, torque, or stall threshold**. `DrivingWheel` in
-   `common/robot/proto/RobotConfigure.proto` has only `wheel_vel_max/min` and
-   `wheel_acc_max/min` and `wheel_radius`.
-3. The firmware names the fault anyway — `kErrRobotFirstStuckOnCarpet`,
-   `kErrRobot{Left,Right}WheelStuckOnCarpet`, in the **application** code block —
-   so the decision is made above the driver, in code we can now pull and
-   disassemble, and it has observable error codes we can watch for live.
-   See `DEVICE_ERROR_CODES.md`.
-4. Next acquisition targets, in order: the `.dag` graph files (they name the
-   module libraries), a `/userdata/mini_dump/` dump (names loaded modules), and
-   the driver-side library once its name is known.
+2. **Still missing after reading the whole served tree: any per-wheel current,
+   torque, or stall threshold.** `DrivingWheel` in
+   `common/robot/proto/RobotConfigure.proto` has only `wheel_vel_max/min`,
+   `wheel_acc_max/min` and `wheel_radius`. What the tree *does* hold, and what an
+   earlier revision of this file denied, is the judgement around it:
+   `planning/conf/escape/EscapeStuck.conf` states the stuck timers and slip and
+   attitude thresholds numerically, and
+   `application_conf/ErrorCodeConfig.conf` states each fault's level, reaction and
+   owning subsystem. See `CARPET.md`.
+3. **The names in the registry misled us here, and were corrected by measuring.**
+   The registry does contain `kErrRobotFirstStuckOnCarpet` and
+   `kErrRobot{Left,Right}WheelStuckOnCarpet`, and it was inferred from that alone
+   that this fault is reported from the application block. A live capture says
+   otherwise: the fault actually raised is `kRightWheelStuck` (`0x02310027`), owned
+   by `感知应用` (the perception application), and the `…StuckOnCarpet` family has no
+   policy item anywhere in the served set — so that family is not the path to
+   follow. See `DEVICE_ERROR_CODES.md`.
+4. Next acquisition targets, in order: the `.dag` graph files (they name the module
+   libraries), a `/userdata/mini_dump/` dump (names loaded modules), and the
+   **perception** module library now that the policy table names it as the owner.
+5. Nothing device-side has been disassembled yet. The pulled images have been read
+   for strings, `DT_NEEDED`, ELF structure and carved descriptors; full
+   disassembly is analysis we have not started.
