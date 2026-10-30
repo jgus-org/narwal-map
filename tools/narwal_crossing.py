@@ -68,10 +68,14 @@ async def main() -> int:
         for a, b in pairs:
             payload = b"\x08" + varint(a) + b"\x10" + varint(b)
             r = await client.send_command(
-                "telecontrol/get_two_rooms_crossing_point", payload, timeout=15.0
+                "telecontrol/get_two_rooms_crossing_point",
+                payload,
+                timeout=15.0,
             )
             d, _ = bbp.decode_message(r.raw_payload)
-            print(f"rooms({a},{b}): result={r.result_code} p1={point(d.get('1'))} p2={point(d.get('2'))}")
+            print(
+                f"rooms({a},{b}): result={r.result_code} p1={point(d.get('1'))} p2={point(d.get('2'))}"
+            )
     finally:
         await client.disconnect()
     return 0

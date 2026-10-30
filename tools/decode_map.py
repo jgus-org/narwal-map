@@ -25,7 +25,9 @@ def decode_grid(field17) -> list[int]:
         field17 = field17.encode("latin-1")
     raw = zlib.decompress(field17, 47)
     if raw[0] != 0x0A:
-        raise ValueError(f"inner message: expected field-1 tag 0x0a, got {raw[0]:#x}")
+        raise ValueError(
+            f"inner message: expected field-1 tag 0x0a, got {raw[0]:#x}"
+        )
     pos = 1
     while raw[pos] & 0x80:  # skip the packed-field length varint
         pos += 1
@@ -73,10 +75,14 @@ def main() -> int:
     bottom, top, left, right = b["1"], b["2"], b["3"], b["4"]
     px = decode_grid(mp["17"])
 
-    print(f"{path.name}: map_id={mp.get('1')} edit_version(33)={mp.get('33')} "
-          f"res={res}mm/px w={w} h={h} pixels={len(px)} (match={len(px) == w * h})")
-    print(f"border bottom={bottom} top={top} left={left} right={right}  "
-          f"=> col=gx-({left}) row=gy-({bottom})")
+    print(
+        f"{path.name}: map_id={mp.get('1')} edit_version(33)={mp.get('33')} "
+        f"res={res}mm/px w={w} h={h} pixels={len(px)} (match={len(px) == w * h})"
+    )
+    print(
+        f"border bottom={bottom} top={top} left={left} right={right}  "
+        f"=> col=gx-({left}) row=gy-({bottom})"
+    )
 
     rooms = Counter(v >> 8 for v in px)
     ptypes = Counter(v & 0xFF for v in px)
@@ -84,9 +90,13 @@ def main() -> int:
     floor_px = sum(c for r, c in rooms.items() if r)
     print(f"rooms: {len(names)}  floor≈{floor_px * (res / 1000) ** 2:.0f} m²")
     for rid in sorted(r for r in rooms if r):
-        print(f"  {ch(rid)} id={rid:<2} {rooms[rid]:>6} px  {names.get(rid, '')}")
+        print(
+            f"  {ch(rid)} id={rid:<2} {rooms[rid]:>6} px  {names.get(rid, '')}"
+        )
     print(f"pixel_type histogram: {dict(sorted(ptypes.items()))}")
-    print(f"wall px (type&0x10): {sum(c for t, c in ptypes.items() if t & 0x10)}")
+    print(
+        f"wall px (type&0x10): {sum(c for t, c in ptypes.items() if t & 0x10)}"
+    )
 
     sx, sy = 4, 7
     print(f"\nroom layout (downsample x/{sx} y/{sy}):")
