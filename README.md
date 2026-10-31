@@ -66,20 +66,18 @@ nix run .                              # from the repo root; then open http://lo
 nix run . -- --dry-run --port 8771     # server flags go after --
 ```
 
-The flake (`flake.nix`) bundles the Python deps (`aiohttp`, `websockets`, and `bbpb`, built from the PyPI release pinned in `pin.nix`), so no `/tmp/narwal-pydeps` step is needed; `git add flake.nix flake.lock` so `nix run .` can see them. It runs the working-tree `server.py`, so UI edits stay live (refresh the browser). `nix develop` drops into a shell with the same Python for the other `tools/*.py`. The server adds the bundled `narwal_client` from `/service` to `sys.path` at runtime (this host).
+The flake (`flake.nix`) bundles the Python deps (`aiohttp` and `websockets` from nixpkgs, plus `bbpb` built from the PyPI release its producer pins), so no `/tmp/narwal-pydeps` step is needed; `git add flake.nix flake.lock` so `nix run .` can see them. It runs the working-tree `server.py`, so UI edits stay live (refresh the browser). `nix develop` drops into a shell with the same Python for the other `tools/*.py`. The server adds the bundled `narwal_client` from `/service` to `sys.path` at runtime (this host).
 
 ### Flake outputs
 
-| Command                    | What it does                                                |
-| -------------------------- | ----------------------------------------------------------- |
-| `nix run .`                | launch the map-edit web tool                                |
-| `nix develop`              | a shell with the bundled Python, for the other `tools/*.py` |
-| `nix build .#bbpb`         | build the pinned `blackboxprotobuf` distribution on its own |
-| `nix run .#update-version` | resolve the newest `bbpb` release and rewrite `pin.nix`     |
-| `nix fmt`                  | format the tree                                             |
-| `nix flake check`          | check it                                                    |
+| Command           | What it does                                                |
+| ----------------- | ----------------------------------------------------------- |
+| `nix run .`       | launch the map-edit web tool                                |
+| `nix develop`     | a shell with the bundled Python, for the other `tools/*.py` |
+| `nix fmt`         | format the tree                                             |
+| `nix flake check` | check it                                                    |
 
-`bbpb` is the PyPI name of `blackboxprotobuf`, which nixpkgs does not carry, so this flake is the pin that carries it: `pin.nix` holds the version and the source hash, and the bundled interpreter takes the package from that pin rather than naming a release of its own. `nix run .#update-branches` maintains one branch per released version; it is meant to be driven by a scheduled workflow, which this repository does not yet carry.
+`bbpb` is the PyPI name of `blackboxprotobuf`, which nixpkgs does not carry, so it is pinned by its own producer, [`jgus-org/bbpb-flake`](https://github.com/jgus-org/bbpb-flake), whose `nix run .#update-version` resolves a new release and rewrites its pin. The input follows this flake's `nixpkgs`, so the bundled interpreter and `bbpb` resolve in one Python set; this repository carries no pin of its own.
 
 Cut: drag a line across a room (the live overlay greys other rooms and colours the resulting pieces — green/blue for a valid 2-way split, orange for an extra piece that would be rejected as `SEG_MULTI_ROOM`); scroll to zoom, drag empty space to pan. Merge: pick two adjacent rooms. The server holds one WS connection (robot allows one per client IP; coexists with off-host HA) and logs every op to `/tmp/narwal-mapedit.log`. `tools/narwal_cut.py` is the equivalent single-shot CLI (dry-run by default; `--send`/`--save`).
 
@@ -115,4 +113,4 @@ nix-shell -p cmake ninja pkg-config icu capstone git \
 - `asm/{srv_map,msg_map}/` — Blutter disassembly of the map proto messages (evidence/provenance).
 - `tools/` — `parse_pb.py` (asm→schema), `show_msg.py`, `extract_desc.py`/`harvest_desc.py` (descriptor harvest), `extract_and_scan.py` (APK→.so→strings), `narwal_read.py` (live read), `narwal_crossing.py` (doorway crossing points), `decode_map.py` (grid decode/render), `narwal_ops.py` (shared op encoders + grid decode), `narwal_cut.py` (cut CLI).
 - `tools/mapedit/` — local click-to-cut/merge web tool (`server.py` + `index.html`).
-- `flake.nix` / `pin.nix` — `nix run .` launches the map-edit tool (bundles the Python deps); `nix develop` for a dev shell; `nix build .#bbpb` builds the pinned distribution, whose version and hash live in `pin.nix`.
+- `flake.nix` — `nix run .` launches the map-edit tool (bundles the Python deps); `nix develop` for a dev shell. The `bbpb` dependency it bundles is pinned by its own producer, [`jgus-org/bbpb-flake`](https://github.com/jgus-org/bbpb-flake).
