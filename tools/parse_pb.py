@@ -24,10 +24,22 @@ CALL_RE = re.compile(r"BuilderInfo::([A-Za-z]\w*)\b")
 CLOSURE_RE = re.compile(r"=> (\w+)")
 
 METHOD = {
-    "aOS": "string", "aQS": "req string", "aOB": "bool", "aQB": "req bool",
-    "aOM": "message", "aQM": "req message", "a": "scalar", "aInt64": "int64",
-    "pc": "repeated message", "pPS": "repeated string", "p": "packed repeated",
-    "e": "enum", "oo": "ONEOF", "m": "map<>", "aOF": "float", "aOD": "double",
+    "aOS": "string",
+    "aQS": "req string",
+    "aOB": "bool",
+    "aQB": "req bool",
+    "aOM": "message",
+    "aQM": "req message",
+    "a": "scalar",
+    "aInt64": "int64",
+    "pc": "repeated message",
+    "pPS": "repeated string",
+    "p": "packed repeated",
+    "e": "enum",
+    "oo": "ONEOF",
+    "m": "map<>",
+    "aOF": "float",
+    "aOD": "double",
 }
 PRIM = {"int", "String", "bool", "double", "Int64", "List"}
 
@@ -69,7 +81,11 @@ def parse(path: Path) -> list[str]:
             label = METHOD.get(meth, meth)
             num = pend_num if pend_num is not None else "?"
             name = pend_name or "-"
-            ref = f" {submsg}" if submsg and ("message" in label or meth == "oo") else ""
+            ref = (
+                f" {submsg}"
+                if submsg and ("message" in label or meth == "oo")
+                else ""
+            )
             out.append(f"  {num:<4} {name:<26} {label}{ref}  ({meth})")
             pend_name = None
             if "message" in label:

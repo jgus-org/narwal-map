@@ -13,33 +13,33 @@ The Kitchen island-crossing cut succeeded; a cut whose line spans into a neighbo
 
 ## `ErrorCode` (field 4) — 25 members
 
-| # | name | meaning (for cut/merge) |
-|---|------|--------|
-| 0 | ERROR_CODE_UNSPECIFIED | (none / absent on success) |
-| 1 | ERROR_CODE_UNMATCHED_EDIT_VERSION | stale `edit_version` — re-read `get_editable_map` first |
-| 2 | ERROR_CODE_ROOM_NUMS_EXCEED | would exceed `EditConfig.max_room_nums` (50) |
-| 3 | ERROR_CODE_ROOM_AREA_TOO_SMALL | a resulting room is below the min area |
-| 4 | ERROR_CODE_INVALID_CARPET_OPERATION | |
-| 5 | ERROR_CODE_INVALID_ROOM_SPLIT_SEGMENT | the cut segment is not a valid split (e.g. doesn't separate the room) |
-| 6 | ERROR_CODE_SAME_NEW_ROOM_IDS | `left_room_id == right_room_id` |
-| 7 | ERROR_CODE_DUPLICATE_NEW_ROOM_ID | new id collides with an existing room |
-| 8 | ERROR_CODE_UNMATCHED_NEW_ROOM_ID | new id violates the id rule |
-| 9 | ERROR_CODE_INVALID_ADD_FORBIDDEN_REGION | |
-| 10 | ERROR_CODE_ROOM_INFO_NOT_EXIST | referenced room id doesn't exist |
-| 11 | ERROR_CODE_INVALID_GROUND_TEXTURE_TYPE | |
-| 12 | ERROR_CODE_INVALID_MERGE_ROOM_NOT_ADJACENT | merge targets aren't adjacent |
-| 13 | ERROR_CODE_MAP_NOT_EXIST | bad `map_id` |
-| 14 | ERROR_CODE_OUT_OF_MAP_BORDER | a point is outside the map border |
-| 15 | ERROR_CODE_ROOM_OVERLAP | |
-| 16 | ERROR_CODE_INVALID_ROOM_ADJACENT | |
-| 17 | ERROR_CODE_INCONSISTENT_ROOM_ID | |
-| 18 | ERROR_CODE_BEAUTIFY_ROOM_SEG_FAIL | post-split contour cleanup failed |
-| 19 | ERROR_CODE_SEG_MULTI_ROOM | **the cut would divide the room into more than two connected floor pieces** (verified on-device: a straight cut that pinches a concave room into 3 regions is rejected; a clean 2-way split is accepted). Also fires if the line strays into a neighbouring room. |
-| 20 | ERROR_CODE_BEAUTIFY_ROOM_MERGE_FAIL | post-merge contour cleanup failed |
-| 101 | ERROR_CODE_FIND_SEGMENT_ROOM_ID_FAIL | couldn't locate the room for the segment |
-| 102 | ERROR_CODE_INVALID_FIRST_ROOM_CENTER_FOR_MERGE | |
-| 103 | ERROR_CODE_INVALID_SECOND_ROOM_CENTER_FOR_MERGE | |
-| 104 | ERROR_CODE_INVALID_MAP_CANNOT_MERGE | |
+| #   | name                                            | meaning (for cut/merge)                                                                                                                                                                                                                                           |
+| --- | ----------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 0   | ERROR_CODE_UNSPECIFIED                          | (none / absent on success)                                                                                                                                                                                                                                        |
+| 1   | ERROR_CODE_UNMATCHED_EDIT_VERSION               | stale `edit_version` — re-read `get_editable_map` first                                                                                                                                                                                                           |
+| 2   | ERROR_CODE_ROOM_NUMS_EXCEED                     | would exceed `EditConfig.max_room_nums` (50)                                                                                                                                                                                                                      |
+| 3   | ERROR_CODE_ROOM_AREA_TOO_SMALL                  | a resulting room is below the min area                                                                                                                                                                                                                            |
+| 4   | ERROR_CODE_INVALID_CARPET_OPERATION             |                                                                                                                                                                                                                                                                   |
+| 5   | ERROR_CODE_INVALID_ROOM_SPLIT_SEGMENT           | the cut segment is not a valid split (e.g. doesn't separate the room)                                                                                                                                                                                             |
+| 6   | ERROR_CODE_SAME_NEW_ROOM_IDS                    | `left_room_id == right_room_id`                                                                                                                                                                                                                                   |
+| 7   | ERROR_CODE_DUPLICATE_NEW_ROOM_ID                | new id collides with an existing room                                                                                                                                                                                                                             |
+| 8   | ERROR_CODE_UNMATCHED_NEW_ROOM_ID                | new id violates the id rule                                                                                                                                                                                                                                       |
+| 9   | ERROR_CODE_INVALID_ADD_FORBIDDEN_REGION         |                                                                                                                                                                                                                                                                   |
+| 10  | ERROR_CODE_ROOM_INFO_NOT_EXIST                  | referenced room id doesn't exist                                                                                                                                                                                                                                  |
+| 11  | ERROR_CODE_INVALID_GROUND_TEXTURE_TYPE          |                                                                                                                                                                                                                                                                   |
+| 12  | ERROR_CODE_INVALID_MERGE_ROOM_NOT_ADJACENT      | merge targets aren't adjacent                                                                                                                                                                                                                                     |
+| 13  | ERROR_CODE_MAP_NOT_EXIST                        | bad `map_id`                                                                                                                                                                                                                                                      |
+| 14  | ERROR_CODE_OUT_OF_MAP_BORDER                    | a point is outside the map border                                                                                                                                                                                                                                 |
+| 15  | ERROR_CODE_ROOM_OVERLAP                         |                                                                                                                                                                                                                                                                   |
+| 16  | ERROR_CODE_INVALID_ROOM_ADJACENT                |                                                                                                                                                                                                                                                                   |
+| 17  | ERROR_CODE_INCONSISTENT_ROOM_ID                 |                                                                                                                                                                                                                                                                   |
+| 18  | ERROR_CODE_BEAUTIFY_ROOM_SEG_FAIL               | post-split contour cleanup failed                                                                                                                                                                                                                                 |
+| 19  | ERROR_CODE_SEG_MULTI_ROOM                       | **the cut would divide the room into more than two connected floor pieces** (verified on-device: a straight cut that pinches a concave room into 3 regions is rejected; a clean 2-way split is accepted). Also fires if the line strays into a neighbouring room. |
+| 20  | ERROR_CODE_BEAUTIFY_ROOM_MERGE_FAIL             | post-merge contour cleanup failed                                                                                                                                                                                                                                 |
+| 101 | ERROR_CODE_FIND_SEGMENT_ROOM_ID_FAIL            | couldn't locate the room for the segment                                                                                                                                                                                                                          |
+| 102 | ERROR_CODE_INVALID_FIRST_ROOM_CENTER_FOR_MERGE  |                                                                                                                                                                                                                                                                   |
+| 103 | ERROR_CODE_INVALID_SECOND_ROOM_CENTER_FOR_MERGE |                                                                                                                                                                                                                                                                   |
+| 104 | ERROR_CODE_INVALID_MAP_CANNOT_MERGE             |                                                                                                                                                                                                                                                                   |
 
 ## `ServiceResult` (field 1) — 33 members
 

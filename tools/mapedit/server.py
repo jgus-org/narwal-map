@@ -22,12 +22,18 @@ from pathlib import Path
 
 sys.path.insert(0, "/tmp/narwal-pydeps")
 sys.path.insert(0, "/service/home-assistant/custom_components/narwal")
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent))  # tools/ for narwal_ops
+sys.path.insert(
+    0, str(Path(__file__).resolve().parent.parent)
+)  # tools/ for narwal_ops
 
 import blackboxprotobuf as bbp  # noqa: E402
 import websockets  # noqa: E402
 from aiohttp import web  # noqa: E402
-from narwal_client import NarwalClient, NarwalCommandError, NarwalConnectionError  # noqa: E402
+from narwal_client import (
+    NarwalClient,
+    NarwalCommandError,
+    NarwalConnectionError,
+)  # noqa: E402
 
 import narwal_ops as ops  # noqa: E402
 
@@ -57,7 +63,13 @@ def _room_at(st: dict, gx: float, gy: float) -> int:
 
 def _cut_pieces(st: dict, x0, y0, x1, y1, room: int) -> list[int]:
     """Floor-piece sizes `room` splits into when the *segment* x0,y0–x1,y1 is walled off; >2 ⇒ SEG_MULTI_ROOM."""
-    w, h, left, bottom, px = st["width"], st["height"], st["left"], st["bottom"], st["pixels"]
+    w, h, left, bottom, px = (
+        st["width"],
+        st["height"],
+        st["left"],
+        st["bottom"],
+        st["pixels"],
+    )
     dx, dy, l2 = x1 - x0, y1 - y0, ((x1 - x0) ** 2 + (y1 - y0) ** 2) or 1.0
     floor = bytearray(w * h)
     for r in range(h):
@@ -70,7 +82,11 @@ def _cut_pieces(st: dict, x0, y0, x1, y1, room: int) -> list[int]:
             t = ((gx - x0) * dx + (gy - y0) * dy) / l2
             on = 0 <= t <= 1
             t = 0.0 if t < 0 else 1.0 if t > 1 else t
-            if on and (gx - (x0 + t * dx)) ** 2 + (gy - (y0 + t * dy)) ** 2 < 0.81:
+            if (
+                on
+                and (gx - (x0 + t * dx)) ** 2 + (gy - (y0 + t * dy)) ** 2
+                < 0.81
+            ):
                 continue  # under the segment → barrier
             floor[base + c] = 1
     seen, sizes = bytearray(w * h), []
@@ -81,7 +97,12 @@ def _cut_pieces(st: dict, x0, y0, x1, y1, room: int) -> list[int]:
                 j = dq.popleft()
                 sz += 1
                 c = j % w
-                for k, ok in ((j - 1, c > 0), (j + 1, c < w - 1), (j - w, j >= w), (j + w, j + w < w * h)):
+                for k, ok in (
+                    (j - 1, c > 0),
+                    (j + 1, c < w - 1),
+                    (j - w, j >= w),
+                    (j + w, j + w < w * h),
+                ):
                     if ok and floor[k] and not seen[k]:
                         seen[k] = 1
                         dq.append(k)
@@ -91,14 +112,29 @@ def _cut_pieces(st: dict, x0, y0, x1, y1, room: int) -> list[int]:
 
 def cut_diagnostic(st: dict, x0, y0, x1, y1) -> str:
     """Why a cut was rejected: rooms touched, endpoint neighbours, and resulting piece count."""
-    along = Counter(r for i in range(61)
-                    for r in (_room_at(st, x0 + (x1 - x0) * i / 60, y0 + (y1 - y0) * i / 60),) if r > 0)
+    along = Counter(
+        r
+        for i in range(61)
+        for r in (
+            _room_at(st, x0 + (x1 - x0) * i / 60, y0 + (y1 - y0) * i / 60),
+        )
+        if r > 0
+    )
 
     def near(gx, gy, rad=3):
-        return sorted({_room_at(st, gx + dx, gy + dy)
-                       for dx in range(-rad, rad + 1) for dy in range(-rad, rad + 1)} - {-1, 0})
-    txt = (f"rooms along line={dict(along)}; "
-           f"near A({x0},{y0})={near(x0, y0)}; near B({x1},{y1})={near(x1, y1)}")
+        return sorted(
+            {
+                _room_at(st, gx + dx, gy + dy)
+                for dx in range(-rad, rad + 1)
+                for dy in range(-rad, rad + 1)
+            }
+            - {-1, 0}
+        )
+
+    txt = (
+        f"rooms along line={dict(along)}; "
+        f"near A({x0},{y0})={near(x0, y0)}; near B({x1},{y1})={near(x1, y1)}"
+    )
     if along:
         room = along.most_common(1)[0][0]
         sizes = _cut_pieces(st, x0, y0, x1, y1, room)
@@ -138,63 +174,115 @@ class Robot:
             except Exception:
                 pass  # best-effort teardown of a dead connection
         log.info("connecting to robot…")
-        self._client = NarwalClient(HOST, device_id=DEVICE_ID, topic_prefix=PREFIX)
+        self._client = NarwalClient(
+            HOST, device_id=DEVICE_ID, topic_prefix=PREFIX
+        )
         await self._client.connect()
         try:
             await self._client.discover_device_id(timeout=20.0)
         except (NarwalCommandError, NarwalConnectionError):
             pass  # wake may no-op if the robot is already awake
 
-    async def command(self, topic: str, payload: bytes = b"", timeout: float = 30.0):
+    async def command(
+        self, topic: str, payload: bytes = b"", timeout: float = 30.0
+    ):
         # The robot drops idle WS connections (keepalive ping timeout once it sleeps);
         # on any transport failure, discard the connection and reconnect once.
         async with self._lock:
             for last in (False, True):
                 try:
                     await self._ensure()
-                    return await self._client.send_command(topic, payload, timeout=timeout)
-                except (NarwalConnectionError, NarwalCommandError,
-                        websockets.exceptions.WebSocketException,
-                        OSError, asyncio.TimeoutError):
+                    return await self._client.send_command(
+                        topic, payload, timeout=timeout
+                    )
+                except (
+                    NarwalConnectionError,
+                    NarwalCommandError,
+                    websockets.exceptions.WebSocketException,
+                    OSError,
+                    asyncio.TimeoutError,
+                ):
                     self._client = None
                     if last:
                         raise
 
     async def read_state(self) -> dict:
-        r = await self.command("map/get_editable_map", b"\x08" + ops.varint(MAP_ID) + b"\x18\x01")
+        r = await self.command(
+            "map/get_editable_map", b"\x08" + ops.varint(MAP_ID) + b"\x18\x01"
+        )
         d, _ = bbp.decode_message(r.raw_payload)
         mp = d["2"]
         rooms = mp.get("12") or []
         rooms = rooms if isinstance(rooms, list) else [rooms]
         return {
-            "map_id": int(mp["1"]), "map_version": int(mp["2"]),
+            "map_id": int(mp["1"]),
+            "map_version": int(mp["2"]),
             "edit_version": int(d.get("3") or mp.get("33") or 0),
-            "width": int(mp["4"]), "height": int(mp["5"]), "resolution": int(mp["3"]),
-            "left": int(mp["6"]["3"]), "bottom": int(mp["6"]["1"]),
-            "rooms": [{"id": int(rm.get("1", 0)), "name": _room_name(rm), "type": rm.get("2")}
-                      for rm in rooms if isinstance(rm, dict)],
+            "width": int(mp["4"]),
+            "height": int(mp["5"]),
+            "resolution": int(mp["3"]),
+            "left": int(mp["6"]["3"]),
+            "bottom": int(mp["6"]["1"]),
+            "rooms": [
+                {
+                    "id": int(rm.get("1", 0)),
+                    "name": _room_name(rm),
+                    "type": rm.get("2"),
+                }
+                for rm in rooms
+                if isinstance(rm, dict)
+            ],
             "pixels": ops.decode_grid(mp["17"]),
         }
 
     async def apply(self, payloads, label="op", diag=None) -> dict:
         st = await self.read_state()
-        req = ops.build_operation_request(st["map_id"], st["map_version"], st["edit_version"], payloads)
-        log.info("%s · edit_version=%s · request=%s", label, st["edit_version"], req.hex())
+        req = ops.build_operation_request(
+            st["map_id"], st["map_version"], st["edit_version"], payloads
+        )
+        log.info(
+            "%s · edit_version=%s · request=%s",
+            label,
+            st["edit_version"],
+            req.hex(),
+        )
         if self.dry:
-            return {"ok": True, "dry": True, "request": req.hex(), "edit_version": st["edit_version"]}
+            return {
+                "ok": True,
+                "dry": True,
+                "request": req.hex(),
+                "edit_version": st["edit_version"],
+            }
         r = await self.command("map/operation", req)
         rd, _ = bbp.decode_message(r.raw_payload)
         result, err = rd.get("1"), rd.get("4")
         ok = result == 1 and not err
-        res = {"ok": ok, "result": result, "result_name": ops.result_name(result),
-               "error_code": err, "error_name": ops.error_name(err),
-               "edit_version": rd.get("3"), "rooms": len(deep(rd, "2", "12") or [])}
+        res = {
+            "ok": ok,
+            "result": result,
+            "result_name": ops.result_name(result),
+            "error_code": err,
+            "error_name": ops.error_name(err),
+            "edit_version": rd.get("3"),
+            "rooms": len(deep(rd, "2", "12") or []),
+        }
         if ok:
             await self.command("map/save_map_update_info", b"")
-            log.info("%s · OK · edit_version→%s · rooms=%s", label, res["edit_version"], res["rooms"])
+            log.info(
+                "%s · OK · edit_version→%s · rooms=%s",
+                label,
+                res["edit_version"],
+                res["rooms"],
+            )
         else:
             res["diag"] = diag(st) if diag else ""
-            log.warning("%s · REJECTED · %s / %s · %s", label, res["result_name"], res["error_name"], res["diag"])
+            log.warning(
+                "%s · REJECTED · %s / %s · %s",
+                label,
+                res["result_name"],
+                res["error_name"],
+                res["diag"],
+            )
         return res
 
 
@@ -210,17 +298,28 @@ async def handle_map(request: web.Request) -> web.Response:
 
 async def handle_cut(request: web.Request) -> web.Response:
     b = await request.json()
-    payload = ops.room_seg_payload(b["x0"], b["y0"], b["x1"], b["y1"], b["left"], b["right"])
+    payload = ops.room_seg_payload(
+        b["x0"], b["y0"], b["x1"], b["y1"], b["left"], b["right"]
+    )
     label = f"cut #{b['left']}→+#{b['right']} ({b['x0']},{b['y0']})-({b['x1']},{b['y1']})"
-    return web.json_response(await request.app["robot"].apply(
-        [payload], label=label, diag=lambda st: cut_diagnostic(st, b["x0"], b["y0"], b["x1"], b["y1"])))
+    return web.json_response(
+        await request.app["robot"].apply(
+            [payload],
+            label=label,
+            diag=lambda st: cut_diagnostic(
+                st, b["x0"], b["y0"], b["x1"], b["y1"]
+            ),
+        )
+    )
 
 
 async def handle_merge(request: web.Request) -> web.Response:
     b = await request.json()
     payload = ops.room_merge_payload(b["room1"], b["room2"], b["new_id"])
     label = f"merge #{b['room1']}+#{b['room2']}→#{b['new_id']}"
-    return web.json_response(await request.app["robot"].apply([payload], label=label))
+    return web.json_response(
+        await request.app["robot"].apply([payload], label=label)
+    )
 
 
 @web.middleware
@@ -231,7 +330,9 @@ async def errors_to_json(request: web.Request, handler):
     except web.HTTPException:
         raise
     except Exception as e:  # noqa: BLE001 - boundary handler
-        return web.json_response({"ok": False, "error": f"{type(e).__name__}: {e}"}, status=500)
+        return web.json_response(
+            {"ok": False, "error": f"{type(e).__name__}: {e}"}, status=500
+        )
 
 
 def main() -> int:
@@ -241,19 +342,25 @@ def main() -> int:
     a = ap.parse_args()
 
     logging.basicConfig(
-        level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s",
-        handlers=[logging.StreamHandler(sys.stderr), logging.FileHandler(LOG_PATH)],
+        level=logging.INFO,
+        format="%(asctime)s %(levelname)s %(message)s",
+        handlers=[
+            logging.StreamHandler(sys.stderr),
+            logging.FileHandler(LOG_PATH),
+        ],
     )
     log.info("logging to %s", LOG_PATH)
 
     app = web.Application(middlewares=[errors_to_json])
     app["robot"] = Robot(dry=a.dry_run)
-    app.add_routes([
-        web.get("/", handle_index),
-        web.get("/api/map", handle_map),
-        web.post("/api/cut", handle_cut),
-        web.post("/api/merge", handle_merge),
-    ])
+    app.add_routes(
+        [
+            web.get("/", handle_index),
+            web.get("/api/map", handle_map),
+            web.post("/api/cut", handle_cut),
+            web.post("/api/merge", handle_merge),
+        ]
+    )
     print(f"map-edit tool on http://localhost:{a.port}  (dry-run={a.dry_run})")
     web.run_app(app, host="127.0.0.1", port=a.port, print=None)
     return 0

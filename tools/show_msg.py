@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """Print named message blocks from SCHEMA.txt."""
+
 import sys
 from pathlib import Path
 

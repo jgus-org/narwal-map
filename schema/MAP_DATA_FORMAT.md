@@ -16,7 +16,7 @@ HACS `narwal_client` it corrects. All values verified against a live Flow 2 capt
 ## 2. Decompress → inner protobuf → pixels
 
 1. **zlib stream.** Byte 0 = `0x78`; byte 1 is the level marker and varies — `0x01` (stored, seen in `get_map`), `0x9c` (default), `0xda` (best, seen in `get_editable_map`). Decompress with auto-detect: `zlib.decompress(data, 47)`.
-2. **Inner message is a `MapData`.** The decompressed bytes are themselves a protobuf message: field 1 (`grids`) is a *packed repeated varint*. So byte 0 = `0x0a` (field 1, wire type 2), then a length varint, then the packed varint pixel stream. (Field 2 `debug_grids` is normally absent.)
+2. **Inner message is a `MapData`.** The decompressed bytes are themselves a protobuf message: field 1 (`grids`) is a _packed repeated varint_. So byte 0 = `0x0a` (field 1, wire type 2), then a length varint, then the packed varint pixel stream. (Field 2 `debug_grids` is normally absent.)
 3. **One varint per pixel, row-major.** `count == width * height`; `index = row * width + col`.
 
 ## 3. Pixel value encoding
@@ -31,11 +31,11 @@ Other `pixel_type` values occur (floor sub-types / materials / edge flags) but a
 
 ## 4. The three coordinate frames
 
-| Frame | Message | Wire type | Units |
-|-------|---------|-----------|-------|
-| Grid coords | `Grid {x,y}` (contours, doors) | varint `int32` | signed grid pixels |
-| Cut/crossing points | `Point {x,y}` | **`fixed32` float** | same signed grid frame, sub-pixel |
-| Robot/dock pose | `PoseData` (origin, station) | `fixed32` float | world **metres** + θ radians |
+| Frame               | Message                        | Wire type           | Units                             |
+| ------------------- | ------------------------------ | ------------------- | --------------------------------- |
+| Grid coords         | `Grid {x,y}` (contours, doors) | varint `int32`      | signed grid pixels                |
+| Cut/crossing points | `Point {x,y}`                  | **`fixed32` float** | same signed grid frame, sub-pixel |
+| Robot/dock pose     | `PoseData` (origin, station)   | `fixed32` float     | world **metres** + θ radians      |
 
 `resolution` (field 3) = **mm per pixel** (60 in the capture).
 

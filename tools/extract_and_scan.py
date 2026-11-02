@@ -33,17 +33,26 @@ def extract_sos() -> dict[str, Path]:
                 for member in apk.namelist():
                     base = member.rsplit("/", 1)[-1]
                     if base in WANT and base not in found:
-                        if "arm64" in member or "arm64" in apk_name or base not in found:
+                        if (
+                            "arm64" in member
+                            or "arm64" in apk_name
+                            or base not in found
+                        ):
                             out = LIBDIR / base
                             out.write_bytes(apk.read(member))
                             found[base] = out
-                            print(f"  extracted {base} ({out.stat().st_size:,} B) from {apk_name}:{member}")
+                            print(
+                                f"  extracted {base} ({out.stat().st_size:,} B) from {apk_name}:{member}"
+                            )
     return found
 
 
 def scan_strings(so: Path) -> list[str]:
     out = subprocess.run(
-        ["strings", "-n", "4", str(so)], capture_output=True, text=True, check=True
+        ["strings", "-n", "4", str(so)],
+        capture_output=True,
+        text=True,
+        check=True,
     )
     lines = out.stdout.splitlines()
     (BASE / f"{so.stem}.strings.txt").write_text(out.stdout)
@@ -77,14 +86,22 @@ def categorize(lines: list[str], label: str) -> None:
         for m in CLASS_KW.finditer(s):
             classes.add(m.group(0))
 
-    map_topics = sorted(t for t in topics if "/" in t and re.search(r"map|room|clean|partition|segment|area", t))
-    print(f"\n===== {label}: topic-shaped tokens touching map/room/clean/partition/segment/area =====")
+    map_topics = sorted(
+        t
+        for t in topics
+        if "/" in t and re.search(r"map|room|clean|partition|segment|area", t)
+    )
+    print(
+        f"\n===== {label}: topic-shaped tokens touching map/room/clean/partition/segment/area ====="
+    )
     for t in map_topics:
         print(f"  {t}")
     print(f"\n===== {label}: lines matching edit keywords (capped 120) =====")
     for s in sorted(edit_lines)[:120]:
         print(f"  {s}")
-    print(f"\n===== {label}: proto/class-shaped names matching edit nouns (capped 120) =====")
+    print(
+        f"\n===== {label}: proto/class-shaped names matching edit nouns (capped 120) ====="
+    )
     for c in sorted(classes)[:120]:
         print(f"  {c}")
 
